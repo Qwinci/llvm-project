@@ -8449,7 +8449,7 @@ void Clang::AddClangCLArgs(const ArgList &Args, types::ID InputType,
    llvm::Triple::ArchType Arch = getToolChain().getArch();
    std::vector<std::string> Values =
        Args.getAllArgValues(options::OPT__SLASH_arch);
-   if (!Values.empty()) {
+   if (!Values.empty() && Arch != llvm::Triple::aarch64) {
      llvm::SmallSet<std::string, 4> SupportedArches;
      if (Arch == llvm::Triple::x86)
        SupportedArches.insert("IA32");
