@@ -350,6 +350,16 @@ size_t ObjectFilePECOFF::GetModuleSpecifications(
     spec.GetTriple().setEnvironment(env);
     specs.Append(module_spec);
     break;
+  case MachineRiscv64:
+    spec.SetTriple("riscv64-pc-windows");
+    spec.GetTriple().setEnvironment(env);
+    // See the matching comment in GetArchitecture: a COFF header cannot report
+    // which ISA extensions an image was built for, so report this target's
+    // defaults. This is the ArchSpec a Target is created from, so eRISCV_rvc
+    // has to be set here too, not just in GetArchitecture.
+    spec.SetFlags(ArchSpec::eRISCV_rvc | ArchSpec::eRISCV_float_abi_double);
+    specs.Append(module_spec);
+    break;
   default:
     break;
   }
@@ -942,11 +952,12 @@ std::unique_ptr<CallFrameInfo> ObjectFilePECOFF::CreateCallFrameInfo() {
   if (!data_dir_exception.vmaddr)
     return {};
 
-  if (m_coff_header.machine != llvm::COFF::IMAGE_FILE_MACHINE_AMD64)
+  if (!PECallFrameInfo::IsSupportedMachine(m_coff_header.machine))
     return {};
 
   return std::make_unique<PECallFrameInfo>(*this, data_dir_exception.vmaddr,
-                                           data_dir_exception.vmsize);
+                                           data_dir_exception.vmsize,
+                                           m_coff_header.machine);
 }
 
 bool ObjectFilePECOFF::IsStripped() {
@@ -1399,10 +1410,23 @@ ArchSpec ObjectFilePECOFF::GetArchitecture() {
   case llvm::COFF::IMAGE_FILE_MACHINE_ARMNT:
   case llvm::COFF::IMAGE_FILE_MACHINE_THUMB:
   case llvm::COFF::IMAGE_FILE_MACHINE_ARM64:
+  case llvm::COFF::IMAGE_FILE_MACHINE_RISCV64:
     ArchSpec arch;
     arch.SetArchitecture(eArchTypeCOFF, machine, LLDB_INVALID_CPUTYPE,
                          IsWindowsSubsystem() ? llvm::Triple::Win32
                                               : llvm::Triple::UnknownOS);
+    // A COFF header has no equivalent of ELF's e_flags, so the ISA extensions
+    // an image was built for cannot be read back out of it. Report the
+    // defaults of the RISC-V Windows target: its ABI is LP64D, so the D
+    // extension is always present, and the C extension is on by default.
+    //
+    // eRISCV_rvc matters for more than instruction decoding: it also gates
+    // ABISysV_riscv::CodeAddressIsValid, which rejects any address with bit 1
+    // set when the C extension is thought to be absent. Leaving it clear makes
+    // unwinding stop at the first return address that is two byte but not four
+    // byte aligned, which is routine in compressed code.
+    if (machine == llvm::COFF::IMAGE_FILE_MACHINE_RISCV64)
+      arch.SetFlags(ArchSpec::eRISCV_rvc | ArchSpec::eRISCV_float_abi_double);
     return arch;
   }
   return ArchSpec();
@@ -1418,4 +1442,24 @@ ObjectFile::Type ObjectFilePECOFF::CalculateType() {
   return eTypeExecutable;
 }
 
-ObjectFile::Strata ObjectFilePECOFF::CalculateStrata() { return eStrataUser; }
+ObjectFile::Strata ObjectFilePECOFF::CalculateStrata() {
+  switch (m_coff_header_opt.subsystem) {
+  // Firmware and boot-time images are never loaded by an OS loader, so there
+  // is no module list for a dynamic loader to query for their load address.
+  // Report them as raw images so that DynamicLoaderStatic claims them and maps
+  // their sections at their file addresses.
+  case llvm::COFF::IMAGE_SUBSYSTEM_EFI_APPLICATION:
+  case llvm::COFF::IMAGE_SUBSYSTEM_EFI_BOOT_SERVICE_DRIVER:
+  case llvm::COFF::IMAGE_SUBSYSTEM_EFI_RUNTIME_DRIVER:
+  case llvm::COFF::IMAGE_SUBSYSTEM_EFI_ROM:
+  case llvm::COFF::IMAGE_SUBSYSTEM_WINDOWS_BOOT_APPLICATION:
+    return eStrataRawImage;
+  default:
+    // IMAGE_SUBSYSTEM_NATIVE is deliberately not listed here: it is shared by
+    // kernel images, kernel-mode drivers and native user mode processes, and
+    // nothing in the header distinguishes them. Those are handled by
+    // DynamicLoaderWindowsDYLD falling back to the preferred image base when
+    // the process cannot report a load address.
+    return eStrataUser;
+  }
+}

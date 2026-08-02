@@ -65,6 +65,7 @@ ArchSpec ObjectFilePDB::GetArchitecture() {
   case PDB_Machine::ArmNT:
   case PDB_Machine::Thumb:
   case PDB_Machine::Arm64:
+  case PDB_Machine::RISCV64:
     ArchSpec arch;
     arch.SetArchitecture(eArchTypeCOFF, static_cast<int>(machine),
                          LLDB_INVALID_CPUTYPE);
@@ -151,6 +152,10 @@ size_t ObjectFilePDB::GetModuleSpecifications(
     break;
   case PDB_Machine::Arm64:
     module_arch.SetTriple("aarch64-pc-windows");
+    specs.Append(module_spec);
+    break;
+  case PDB_Machine::RISCV64:
+    module_arch.SetTriple("riscv64-pc-windows");
     specs.Append(module_spec);
     break;
   default:

@@ -1606,7 +1606,16 @@ DisassemblerLLVMC::DisassemblerLLVMC(const ArchSpec &arch,
       features_str += "+f,+d,+q,";
     // FIXME: how do we detect features such as `+a`, `+m`?
     // Turn them on by default now, since everyone seems to use them
-    features_str += "+a,+m,";
+    //
+    // `+c` is also turned on unconditionally rather than only when
+    // eRISCV_rvc is set, because some object file formats cannot report it:
+    // a COFF header has no equivalent of ELF's e_flags. Enabling it is safe
+    // for decoding either way, since compressed encodings (bits[1:0] != 0b11)
+    // are disjoint from the 32 bit ones and so cannot change how an
+    // uncompressed instruction decodes. Note eRISCV_rvc additionally selects
+    // the two byte c.ebreak software breakpoint, which is why that flag is
+    // still only set when the object file really reports it.
+    features_str += "+a,+m,+c,";
   }
 
   // We use m_disasm_up.get() to tell whether we are valid or not, so if this

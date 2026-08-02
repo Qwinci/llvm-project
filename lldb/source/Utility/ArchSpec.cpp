@@ -430,7 +430,8 @@ static const ArchDefinitionEntry g_coff_arch_entries[] = {
     {ArchSpec::eCore_arm_armv7,     llvm::COFF::IMAGE_FILE_MACHINE_ARMNT}, // ARMv7
     {ArchSpec::eCore_thumb,         llvm::COFF::IMAGE_FILE_MACHINE_THUMB}, // ARMv7
     {ArchSpec::eCore_x86_64_x86_64, llvm::COFF::IMAGE_FILE_MACHINE_AMD64}, // AMD64
-    {ArchSpec::eCore_arm_arm64,     llvm::COFF::IMAGE_FILE_MACHINE_ARM64} // ARM64
+    {ArchSpec::eCore_arm_arm64,     llvm::COFF::IMAGE_FILE_MACHINE_ARM64}, // ARM64
+    {ArchSpec::eCore_riscv64,       llvm::COFF::IMAGE_FILE_MACHINE_RISCV64} // RISCV64
 };
 // clang-format on
 

@@ -9,6 +9,7 @@
 #include "gtest/gtest.h"
 
 #include "lldb/Utility/ArchSpec.h"
+#include "llvm/BinaryFormat/COFF.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/BinaryFormat/MachO.h"
 
@@ -152,6 +153,45 @@ TEST(ArchSpecTest, TestSetTriple) {
 
   AS = ArchSpec();
   EXPECT_FALSE(AS.SetTriple(""));
+}
+
+TEST(ArchSpecTest, TestSetArchitectureCOFF) {
+  auto FromMachine = [](uint32_t Machine) {
+    ArchSpec AS;
+    EXPECT_TRUE(AS.SetArchitecture(eArchTypeCOFF, Machine, LLDB_INVALID_CPUTYPE,
+                                   llvm::Triple::Win32));
+    return AS;
+  };
+
+  // Note the triples below spell the architecture with the ArchSpec core name,
+  // which is not always the canonical llvm::Triple spelling (ARM64 comes out as
+  // "arm64-pc-windows", not "aarch64-pc-windows"). Check the parsed arch rather
+  // than the string where the two differ.
+  {
+    ArchSpec AS = FromMachine(llvm::COFF::IMAGE_FILE_MACHINE_AMD64);
+    EXPECT_EQ(ArchSpec::eCore_x86_64_x86_64, AS.GetCore());
+    EXPECT_EQ(llvm::Triple::x86_64, AS.GetTriple().getArch());
+    EXPECT_EQ("x86_64-pc-windows", AS.GetTriple().getTriple());
+  }
+  {
+    ArchSpec AS = FromMachine(llvm::COFF::IMAGE_FILE_MACHINE_ARM64);
+    EXPECT_EQ(ArchSpec::eCore_arm_arm64, AS.GetCore());
+    EXPECT_EQ(llvm::Triple::aarch64, AS.GetTriple().getArch());
+  }
+  {
+    ArchSpec AS = FromMachine(llvm::COFF::IMAGE_FILE_MACHINE_RISCV64);
+    EXPECT_EQ(ArchSpec::eCore_riscv64, AS.GetCore());
+    EXPECT_EQ(llvm::Triple::riscv64, AS.GetTriple().getArch());
+    EXPECT_EQ("riscv64-pc-windows", AS.GetTriple().getTriple());
+  }
+  {
+    // A machine type with no entry in the table leaves the ArchSpec invalid.
+    ArchSpec AS;
+    EXPECT_FALSE(AS.SetArchitecture(eArchTypeCOFF,
+                                    llvm::COFF::IMAGE_FILE_MACHINE_RISCV128,
+                                    LLDB_INVALID_CPUTYPE, llvm::Triple::Win32));
+    EXPECT_FALSE(AS.IsValid());
+  }
 }
 
 TEST(ArchSpecTest, MergeFrom) {

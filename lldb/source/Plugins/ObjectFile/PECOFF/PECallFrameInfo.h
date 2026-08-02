@@ -26,9 +26,15 @@ struct RuntimeFunction;
 
 class PECallFrameInfo : public virtual lldb_private::CallFrameInfo {
 public:
+  /// \param machine the COFF machine type of \p object_file, which selects how
+  /// the unwind codes are decoded. Use IsSupportedMachine to check that a
+  /// machine type can be decoded before constructing.
   explicit PECallFrameInfo(ObjectFilePECOFF &object_file,
                            uint32_t exception_dir_rva,
-                           uint32_t exception_dir_size);
+                           uint32_t exception_dir_size, uint16_t machine);
+
+  /// Whether unwind info for \p machine can be decoded.
+  static bool IsSupportedMachine(uint16_t machine);
 
   bool GetAddressRange(lldb_private::Address addr,
                        lldb_private::AddressRange &range) override;
@@ -48,6 +54,7 @@ private:
 
   ObjectFilePECOFF &m_object_file;
   lldb_private::DataExtractor m_exception_dir;
+  uint16_t m_machine;
 };
 
 #endif // LLDB_SOURCE_PLUGINS_OBJECTFILE_PECOFF_PECALLFRAMEINFO_H

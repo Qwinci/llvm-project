@@ -31,6 +31,10 @@ static uint32_t ResolveLLDBRegisterNum(llvm::StringRef reg_name, llvm::Triple::A
       cpu_type = llvm::codeview::CPUType::ARM64;
       break;
 
+    case llvm::Triple::ArchType::riscv64:
+      cpu_type = llvm::codeview::CPUType::RISCV64;
+      break;
+
     default:
       cpu_type = llvm::codeview::CPUType::X64;
       break;

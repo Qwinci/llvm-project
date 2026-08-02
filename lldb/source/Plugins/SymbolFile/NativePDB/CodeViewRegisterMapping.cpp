@@ -11,6 +11,7 @@
 #include "lldb/lldb-defines.h"
 
 #include "Plugins/Process/Utility/lldb-arm64-register-enums.h"
+#include "Plugins/Process/Utility/lldb-riscv-register-enums.h"
 #include "Plugins/Process/Utility/lldb-x86-register-enums.h"
 
 using namespace lldb_private;
@@ -607,6 +608,80 @@ static const uint32_t g_code_view_to_lldb_registers_x86_64[] = {
     lldb_bnd2_x86_64  // BND2
 };
 
+static const uint32_t g_code_view_to_lldb_registers_riscv64[] = {
+    LLDB_INVALID_REGNUM, // RISCV64_NOREG, 0
+    LLDB_INVALID_REGNUM, LLDB_INVALID_REGNUM, LLDB_INVALID_REGNUM,
+    LLDB_INVALID_REGNUM, LLDB_INVALID_REGNUM, LLDB_INVALID_REGNUM,
+    LLDB_INVALID_REGNUM, LLDB_INVALID_REGNUM, LLDB_INVALID_REGNUM, // 1-9 unused
+    gpr_x0_riscv,  // RISCV64_X0, 10
+    gpr_x1_riscv,  // RISCV64_X1, 11
+    gpr_x2_riscv,  // RISCV64_X2, 12
+    gpr_x3_riscv,  // RISCV64_X3, 13
+    gpr_x4_riscv,  // RISCV64_X4, 14
+    gpr_x5_riscv,  // RISCV64_X5, 15
+    gpr_x6_riscv,  // RISCV64_X6, 16
+    gpr_x7_riscv,  // RISCV64_X7, 17
+    gpr_x8_riscv,  // RISCV64_X8, 18
+    gpr_x9_riscv,  // RISCV64_X9, 19
+    gpr_x10_riscv, // RISCV64_X10, 20
+    gpr_x11_riscv, // RISCV64_X11, 21
+    gpr_x12_riscv, // RISCV64_X12, 22
+    gpr_x13_riscv, // RISCV64_X13, 23
+    gpr_x14_riscv, // RISCV64_X14, 24
+    gpr_x15_riscv, // RISCV64_X15, 25
+    gpr_x16_riscv, // RISCV64_X16, 26
+    gpr_x17_riscv, // RISCV64_X17, 27
+    gpr_x18_riscv, // RISCV64_X18, 28
+    gpr_x19_riscv, // RISCV64_X19, 29
+    gpr_x20_riscv, // RISCV64_X20, 30
+    gpr_x21_riscv, // RISCV64_X21, 31
+    gpr_x22_riscv, // RISCV64_X22, 32
+    gpr_x23_riscv, // RISCV64_X23, 33
+    gpr_x24_riscv, // RISCV64_X24, 34
+    gpr_x25_riscv, // RISCV64_X25, 35
+    gpr_x26_riscv, // RISCV64_X26, 36
+    gpr_x27_riscv, // RISCV64_X27, 37
+    gpr_x28_riscv, // RISCV64_X28, 38
+    gpr_x29_riscv, // RISCV64_X29, 39
+    gpr_x30_riscv, // RISCV64_X30, 40
+    gpr_x31_riscv, // RISCV64_X31, 41
+    LLDB_INVALID_REGNUM, LLDB_INVALID_REGNUM, LLDB_INVALID_REGNUM,
+    LLDB_INVALID_REGNUM, LLDB_INVALID_REGNUM, LLDB_INVALID_REGNUM,
+    LLDB_INVALID_REGNUM, LLDB_INVALID_REGNUM, // 42-49 unused
+    fpr_f0_riscv,                             // RISCV64_F0, 50
+    fpr_f1_riscv,                             // RISCV64_F1, 51
+    fpr_f2_riscv,                             // RISCV64_F2, 52
+    fpr_f3_riscv,                             // RISCV64_F3, 53
+    fpr_f4_riscv,                             // RISCV64_F4, 54
+    fpr_f5_riscv,                             // RISCV64_F5, 55
+    fpr_f6_riscv,                             // RISCV64_F6, 56
+    fpr_f7_riscv,                             // RISCV64_F7, 57
+    fpr_f8_riscv,                             // RISCV64_F8, 58
+    fpr_f9_riscv,                             // RISCV64_F9, 59
+    fpr_f10_riscv,                            // RISCV64_F10, 60
+    fpr_f11_riscv,                            // RISCV64_F11, 61
+    fpr_f12_riscv,                            // RISCV64_F12, 62
+    fpr_f13_riscv,                            // RISCV64_F13, 63
+    fpr_f14_riscv,                            // RISCV64_F14, 64
+    fpr_f15_riscv,                            // RISCV64_F15, 65
+    fpr_f16_riscv,                            // RISCV64_F16, 66
+    fpr_f17_riscv,                            // RISCV64_F17, 67
+    fpr_f18_riscv,                            // RISCV64_F18, 68
+    fpr_f19_riscv,                            // RISCV64_F19, 69
+    fpr_f20_riscv,                            // RISCV64_F20, 70
+    fpr_f21_riscv,                            // RISCV64_F21, 71
+    fpr_f22_riscv,                            // RISCV64_F22, 72
+    fpr_f23_riscv,                            // RISCV64_F23, 73
+    fpr_f24_riscv,                            // RISCV64_F24, 74
+    fpr_f25_riscv,                            // RISCV64_F25, 75
+    fpr_f26_riscv,                            // RISCV64_F26, 76
+    fpr_f27_riscv,                            // RISCV64_F27, 77
+    fpr_f28_riscv,                            // RISCV64_F28, 78
+    fpr_f29_riscv,                            // RISCV64_F29, 79
+    fpr_f30_riscv,                            // RISCV64_F30, 80
+    fpr_f31_riscv,                            // RISCV64_F31, 81
+};
+
 uint32_t lldb_private::npdb::GetLLDBRegisterNumber(
     llvm::Triple::ArchType arch_type, llvm::codeview::RegisterId register_id) {
   switch (arch_type) {
@@ -637,6 +712,14 @@ uint32_t lldb_private::npdb::GetLLDBRegisterNumber(
     default:
       return LLDB_INVALID_REGNUM;
     }
+  case llvm::Triple::riscv64:
+    if (static_cast<uint16_t>(register_id) <
+        sizeof(g_code_view_to_lldb_registers_riscv64) /
+            sizeof(g_code_view_to_lldb_registers_riscv64[0]))
+      return g_code_view_to_lldb_registers_riscv64[static_cast<uint16_t>(
+          register_id)];
+
+    return LLDB_INVALID_REGNUM;
   case llvm::Triple::x86_64:
     if (static_cast<uint16_t>(register_id) <
         sizeof(g_code_view_to_lldb_registers_x86_64) /
@@ -652,97 +735,97 @@ uint32_t lldb_private::npdb::GetLLDBRegisterNumber(
 
 uint32_t
 lldb_private::npdb::GetRegisterSize(llvm::codeview::RegisterId register_id) {
-  switch(register_id) {
-    case llvm::codeview::RegisterId::AL:
-    case llvm::codeview::RegisterId::BL:
-    case llvm::codeview::RegisterId::CL:
-    case llvm::codeview::RegisterId::DL:
-    case llvm::codeview::RegisterId::AH:
-    case llvm::codeview::RegisterId::BH:
-    case llvm::codeview::RegisterId::CH:
-    case llvm::codeview::RegisterId::DH:
-    case llvm::codeview::RegisterId::SIL:
-    case llvm::codeview::RegisterId::DIL:
-    case llvm::codeview::RegisterId::BPL:
-    case llvm::codeview::RegisterId::SPL:
-    case llvm::codeview::RegisterId::R8B:
-    case llvm::codeview::RegisterId::R9B:
-    case llvm::codeview::RegisterId::R10B:
-    case llvm::codeview::RegisterId::R11B:
-    case llvm::codeview::RegisterId::R12B:
-    case llvm::codeview::RegisterId::R13B:
-    case llvm::codeview::RegisterId::R14B:
-    case llvm::codeview::RegisterId::R15B:
-      return 1;
-    case llvm::codeview::RegisterId::AX:
-    case llvm::codeview::RegisterId::BX:
-    case llvm::codeview::RegisterId::CX:
-    case llvm::codeview::RegisterId::DX:
-    case llvm::codeview::RegisterId::SP:
-    case llvm::codeview::RegisterId::BP:
-    case llvm::codeview::RegisterId::SI:
-    case llvm::codeview::RegisterId::DI:
-    case llvm::codeview::RegisterId::R8W:
-    case llvm::codeview::RegisterId::R9W:
-    case llvm::codeview::RegisterId::R10W:
-    case llvm::codeview::RegisterId::R11W:
-    case llvm::codeview::RegisterId::R12W:
-    case llvm::codeview::RegisterId::R13W:
-    case llvm::codeview::RegisterId::R14W:
-    case llvm::codeview::RegisterId::R15W:
-      return 2;
-    case llvm::codeview::RegisterId::EAX:
-    case llvm::codeview::RegisterId::EBX:
-    case llvm::codeview::RegisterId::ECX:
-    case llvm::codeview::RegisterId::EDX:
-    case llvm::codeview::RegisterId::ESP:
-    case llvm::codeview::RegisterId::EBP:
-    case llvm::codeview::RegisterId::ESI:
-    case llvm::codeview::RegisterId::EDI:
-    case llvm::codeview::RegisterId::R8D:
-    case llvm::codeview::RegisterId::R9D:
-    case llvm::codeview::RegisterId::R10D:
-    case llvm::codeview::RegisterId::R11D:
-    case llvm::codeview::RegisterId::R12D:
-    case llvm::codeview::RegisterId::R13D:
-    case llvm::codeview::RegisterId::R14D:
-    case llvm::codeview::RegisterId::R15D:
-      return 4;
-    case llvm::codeview::RegisterId::RAX:
-    case llvm::codeview::RegisterId::RBX:
-    case llvm::codeview::RegisterId::RCX:
-    case llvm::codeview::RegisterId::RDX:
-    case llvm::codeview::RegisterId::RSI:
-    case llvm::codeview::RegisterId::RDI:
-    case llvm::codeview::RegisterId::RBP:
-    case llvm::codeview::RegisterId::RSP:
-    case llvm::codeview::RegisterId::R8:
-    case llvm::codeview::RegisterId::R9:
-    case llvm::codeview::RegisterId::R10:
-    case llvm::codeview::RegisterId::R11:
-    case llvm::codeview::RegisterId::R12:
-    case llvm::codeview::RegisterId::R13:
-    case llvm::codeview::RegisterId::R14:
-    case llvm::codeview::RegisterId::R15:
-      return 8;
-    case llvm::codeview::RegisterId::XMM0:
-    case llvm::codeview::RegisterId::XMM1:
-    case llvm::codeview::RegisterId::XMM2:
-    case llvm::codeview::RegisterId::XMM3:
-    case llvm::codeview::RegisterId::XMM4:
-    case llvm::codeview::RegisterId::XMM5:
-    case llvm::codeview::RegisterId::XMM6:
-    case llvm::codeview::RegisterId::XMM7:
-    case llvm::codeview::RegisterId::XMM8:
-    case llvm::codeview::RegisterId::XMM9:
-    case llvm::codeview::RegisterId::XMM10:
-    case llvm::codeview::RegisterId::XMM11:
-    case llvm::codeview::RegisterId::XMM12:
-    case llvm::codeview::RegisterId::XMM13:
-    case llvm::codeview::RegisterId::XMM14:
-    case llvm::codeview::RegisterId::XMM15:
-      return 16;
-    default:
-      return 0;
+  switch (register_id) {
+  case llvm::codeview::RegisterId::AL:
+  case llvm::codeview::RegisterId::BL:
+  case llvm::codeview::RegisterId::CL:
+  case llvm::codeview::RegisterId::DL:
+  case llvm::codeview::RegisterId::AH:
+  case llvm::codeview::RegisterId::BH:
+  case llvm::codeview::RegisterId::CH:
+  case llvm::codeview::RegisterId::DH:
+  case llvm::codeview::RegisterId::SIL:
+  case llvm::codeview::RegisterId::DIL:
+  case llvm::codeview::RegisterId::BPL:
+  case llvm::codeview::RegisterId::SPL:
+  case llvm::codeview::RegisterId::R8B:
+  case llvm::codeview::RegisterId::R9B:
+  case llvm::codeview::RegisterId::R10B:
+  case llvm::codeview::RegisterId::R11B:
+  case llvm::codeview::RegisterId::R12B:
+  case llvm::codeview::RegisterId::R13B:
+  case llvm::codeview::RegisterId::R14B:
+  case llvm::codeview::RegisterId::R15B:
+    return 1;
+  case llvm::codeview::RegisterId::AX:
+  case llvm::codeview::RegisterId::BX:
+  case llvm::codeview::RegisterId::CX:
+  case llvm::codeview::RegisterId::DX:
+  case llvm::codeview::RegisterId::SP:
+  case llvm::codeview::RegisterId::BP:
+  case llvm::codeview::RegisterId::SI:
+  case llvm::codeview::RegisterId::DI:
+  case llvm::codeview::RegisterId::R8W:
+  case llvm::codeview::RegisterId::R9W:
+  case llvm::codeview::RegisterId::R10W:
+  case llvm::codeview::RegisterId::R11W:
+  case llvm::codeview::RegisterId::R12W:
+  case llvm::codeview::RegisterId::R13W:
+  case llvm::codeview::RegisterId::R14W:
+  case llvm::codeview::RegisterId::R15W:
+    return 2;
+  case llvm::codeview::RegisterId::EAX:
+  case llvm::codeview::RegisterId::EBX:
+  case llvm::codeview::RegisterId::ECX:
+  case llvm::codeview::RegisterId::EDX:
+  case llvm::codeview::RegisterId::ESP:
+  case llvm::codeview::RegisterId::EBP:
+  case llvm::codeview::RegisterId::ESI:
+  case llvm::codeview::RegisterId::EDI:
+  case llvm::codeview::RegisterId::R8D:
+  case llvm::codeview::RegisterId::R9D:
+  case llvm::codeview::RegisterId::R10D:
+  case llvm::codeview::RegisterId::R11D:
+  case llvm::codeview::RegisterId::R12D:
+  case llvm::codeview::RegisterId::R13D:
+  case llvm::codeview::RegisterId::R14D:
+  case llvm::codeview::RegisterId::R15D:
+    return 4;
+  case llvm::codeview::RegisterId::RAX:
+  case llvm::codeview::RegisterId::RBX:
+  case llvm::codeview::RegisterId::RCX:
+  case llvm::codeview::RegisterId::RDX:
+  case llvm::codeview::RegisterId::RSI:
+  case llvm::codeview::RegisterId::RDI:
+  case llvm::codeview::RegisterId::RBP:
+  case llvm::codeview::RegisterId::RSP:
+  case llvm::codeview::RegisterId::R8:
+  case llvm::codeview::RegisterId::R9:
+  case llvm::codeview::RegisterId::R10:
+  case llvm::codeview::RegisterId::R11:
+  case llvm::codeview::RegisterId::R12:
+  case llvm::codeview::RegisterId::R13:
+  case llvm::codeview::RegisterId::R14:
+  case llvm::codeview::RegisterId::R15:
+    return 8;
+  case llvm::codeview::RegisterId::XMM0:
+  case llvm::codeview::RegisterId::XMM1:
+  case llvm::codeview::RegisterId::XMM2:
+  case llvm::codeview::RegisterId::XMM3:
+  case llvm::codeview::RegisterId::XMM4:
+  case llvm::codeview::RegisterId::XMM5:
+  case llvm::codeview::RegisterId::XMM6:
+  case llvm::codeview::RegisterId::XMM7:
+  case llvm::codeview::RegisterId::XMM8:
+  case llvm::codeview::RegisterId::XMM9:
+  case llvm::codeview::RegisterId::XMM10:
+  case llvm::codeview::RegisterId::XMM11:
+  case llvm::codeview::RegisterId::XMM12:
+  case llvm::codeview::RegisterId::XMM13:
+  case llvm::codeview::RegisterId::XMM14:
+  case llvm::codeview::RegisterId::XMM15:
+    return 16;
+  default:
+    return 0;
   }
 }

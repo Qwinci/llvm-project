@@ -36,6 +36,7 @@ public:
     MachinePowerPc = 0x1f0,
     MachinePowerPcfp = 0x1f1,
     MachineR4000 = 0x166,
+    MachineRiscv64 = 0x5064,
     MachineSh3 = 0x1a2,
     MachineSh3dsp = 0x1a3,
     MachineSh4 = 0x1a6,
