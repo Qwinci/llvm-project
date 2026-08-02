@@ -706,6 +706,13 @@ UnwindCursor<A, R>::UnwindCursor(unw_context_t *context, A &as)
   _msContext.Pc = r.getRegister(UNW_REG_IP);
   for (int i = UNW_AARCH64_V0; i <= UNW_ARM64_D31; ++i)
     _msContext.V[i - UNW_AARCH64_V0].D[0] = r.getFloatRegister(i);
+#elif defined(_LIBUNWIND_TARGET_RISCV)
+  for (int i = UNW_RISCV_X0; i <= UNW_RISCV_X31; ++i)
+    _msContext.X[i - UNW_RISCV_X0] = r.getRegister(i);
+  _msContext.Sp = r.getRegister(UNW_REG_SP);
+  _msContext.Pc = r.getRegister(UNW_REG_IP);
+  for (int i = UNW_RISCV_F0; i <= UNW_RISCV_F31; ++i)
+    _msContext.D[i - UNW_RISCV_F0] = r.getFloatRegister(i);
 #endif
 }
 
@@ -734,6 +741,8 @@ bool UnwindCursor<A, R>::validReg(int regNum) {
     return true;
 #elif defined(_LIBUNWIND_TARGET_AARCH64)
   if (regNum >= UNW_AARCH64_X0 && regNum <= UNW_ARM64_X30) return true;
+#elif defined(_LIBUNWIND_TARGET_RISCV)
+  if (regNum >= UNW_RISCV_X0 && regNum <= UNW_RISCV_X31) return true;
 #endif
   return false;
 }
@@ -784,6 +793,10 @@ unw_word_t UnwindCursor<A, R>::getReg(int regNum) {
   case UNW_REG_SP: return _msContext.Sp;
   case UNW_REG_IP: return _msContext.Pc;
   default: return _msContext.X[regNum - UNW_AARCH64_X0];
+#elif defined(_LIBUNWIND_TARGET_RISCV)
+  case UNW_REG_SP: return _msContext.Sp;
+  case UNW_REG_IP: return _msContext.Pc;
+  default: return _msContext.X[regNum - UNW_RISCV_X0];
 #endif
   }
   _LIBUNWIND_ABORT("unsupported register");
@@ -865,6 +878,41 @@ void UnwindCursor<A, R>::setReg(int regNum, unw_word_t value) {
   case UNW_AARCH64_X28:
   case UNW_AARCH64_FP:
   case UNW_AARCH64_LR: _msContext.X[regNum - UNW_ARM64_X0] = value; break;
+#elif defined(_LIBUNWIND_TARGET_RISCV)
+  case UNW_REG_SP: _msContext.Sp = value; break;
+  case UNW_REG_IP: _msContext.Pc = value; break;
+  case UNW_RISCV_X0:
+  case UNW_RISCV_X1:
+  case UNW_RISCV_X2:
+  case UNW_RISCV_X3:
+  case UNW_RISCV_X4:
+  case UNW_RISCV_X5:
+  case UNW_RISCV_X6:
+  case UNW_RISCV_X7:
+  case UNW_RISCV_X8:
+  case UNW_RISCV_X9:
+  case UNW_RISCV_X10:
+  case UNW_RISCV_X11:
+  case UNW_RISCV_X12:
+  case UNW_RISCV_X13:
+  case UNW_RISCV_X14:
+  case UNW_RISCV_X15:
+  case UNW_RISCV_X16:
+  case UNW_RISCV_X17:
+  case UNW_RISCV_X18:
+  case UNW_RISCV_X19:
+  case UNW_RISCV_X20:
+  case UNW_RISCV_X21:
+  case UNW_RISCV_X22:
+  case UNW_RISCV_X23:
+  case UNW_RISCV_X24:
+  case UNW_RISCV_X25:
+  case UNW_RISCV_X26:
+  case UNW_RISCV_X27:
+  case UNW_RISCV_X28:
+  case UNW_RISCV_X29:
+  case UNW_RISCV_X30:
+  case UNW_RISCV_X31: _msContext.X[regNum - UNW_RISCV_X0] = value; break;
 #endif
   default:
     _LIBUNWIND_ABORT("unsupported register");
@@ -878,6 +926,8 @@ bool UnwindCursor<A, R>::validFloatReg(int regNum) {
   if (regNum >= UNW_ARM_D0 && regNum <= UNW_ARM_D31) return true;
 #elif defined(_LIBUNWIND_TARGET_AARCH64)
   if (regNum >= UNW_AARCH64_V0 && regNum <= UNW_ARM64_D31) return true;
+#elif defined(_LIBUNWIND_TARGET_RISCV)
+  if (regNum >= UNW_RISCV_F0 && regNum <= UNW_RISCV_F31) return true;
 #else
   (void)regNum;
 #endif
@@ -906,6 +956,8 @@ unw_fpreg_t UnwindCursor<A, R>::getFloatReg(int regNum) {
   _LIBUNWIND_ABORT("unsupported float register");
 #elif defined(_LIBUNWIND_TARGET_AARCH64)
   return _msContext.V[regNum - UNW_AARCH64_V0].D[0];
+#elif defined(_LIBUNWIND_TARGET_RISCV)
+  return _msContext.D[regNum - UNW_RISCV_F0];
 #else
   (void)regNum;
   _LIBUNWIND_ABORT("float registers unimplemented");
@@ -934,6 +986,8 @@ void UnwindCursor<A, R>::setFloatReg(int regNum, unw_fpreg_t value) {
   _LIBUNWIND_ABORT("unsupported float register");
 #elif defined(_LIBUNWIND_TARGET_AARCH64)
   _msContext.V[regNum - UNW_AARCH64_V0].D[0] = value;
+#elif defined(_LIBUNWIND_TARGET_RISCV)
+  _msContext.D[regNum - UNW_RISCV_F0] = value;
 #else
   (void)regNum;
   (void)value;
@@ -2104,7 +2158,7 @@ bool UnwindCursor<A, R>::getInfoFromSEH(pint_t pc) {
   _info.unwind_info = reinterpret_cast<unw_word_t>(unwindEntry);
   _info.extra = base;
   _info.start_ip = base + unwindEntry->BeginAddress;
-#ifdef _LIBUNWIND_TARGET_X86_64
+#if defined(_LIBUNWIND_TARGET_X86_64) || defined(_LIBUNWIND_TARGET_RISCV)
   _info.end_ip = base + unwindEntry->EndAddress;
   // Only fill in the handler and LSDA if they're stale.
   if (pc != getLastPC()) {

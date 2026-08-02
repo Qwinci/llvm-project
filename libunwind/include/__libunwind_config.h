@@ -158,7 +158,15 @@
 #  if __riscv_xlen == 32
 #   define _LIBUNWIND_CURSOR_SIZE (_LIBUNWIND_CONTEXT_SIZE + 7)
 #  elif __riscv_xlen == 64
-#   define _LIBUNWIND_CURSOR_SIZE (_LIBUNWIND_CONTEXT_SIZE + 12)
+// For __SEH__ builds the cursor embeds the Windows CONTEXT/DISPATCHER_CONTEXT
+// structs, which are fixed-size (always 32 X + 32 D slots) and so do not scale
+// with RISCV_FLEN the way _LIBUNWIND_CONTEXT_SIZE does; hence a measured
+// sizeof(UnwindCursor<...>) rather than an offset from it.
+#   if defined(__SEH__)
+#    define _LIBUNWIND_CURSOR_SIZE 118
+#   else
+#    define _LIBUNWIND_CURSOR_SIZE (_LIBUNWIND_CONTEXT_SIZE + 12)
+#   endif
 #  else
 #   error "Unsupported RISC-V ABI"
 #  endif

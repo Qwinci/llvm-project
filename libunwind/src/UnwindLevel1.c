@@ -88,6 +88,20 @@
                      : "r"(shstkRegContext), "r"(shstkJumpAddress)             \
                      : "x0", "x1");                                            \
   } while (0)
+#elif defined(_LIBUNWIND_TARGET_RISCV)
+#define __shstk_step_size (8)
+#define __unw_phase2_resume(cursor, payload)                                   \
+  do {                                                                         \
+    _LIBUNWIND_POP_SHSTK_SSP((payload));                                       \
+    void *shstkRegContext = __libunwind_shstk_get_registers((cursor));         \
+    void *shstkJumpAddress = __libunwind_shstk_get_jump_target();              \
+    __asm__ volatile("mv a0, %0\n\t"                                           \
+                     "li a1, 0\n\t"                                            \
+                     "jr %1\n\t"                                               \
+                     :                                                         \
+                     : "r"(shstkRegContext), "r"(shstkJumpAddress)             \
+                     : "a0", "a1");                                            \
+  } while (0)
 #endif
 
 // We need this helper function as the semantics of casting between integers and
