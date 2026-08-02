@@ -1001,6 +1001,9 @@ void SignalContext::InitPcSpBp() {
 #    if SANITIZER_ARM64
   bp = (uptr)context_record->Fp;
   sp = (uptr)context_record->Sp;
+#    elif SANITIZER_RISCV64
+  bp = (uptr)context_record->Fp;
+  sp = (uptr)context_record->Sp;
 #    else
   bp = (uptr)context_record->Rbp;
   sp = (uptr)context_record->Rsp;

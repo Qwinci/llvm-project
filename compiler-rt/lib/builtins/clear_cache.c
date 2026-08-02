@@ -60,7 +60,7 @@ uintptr_t GetCurrentProcess(void);
 
 void __clear_cache(void *start, void *end) {
 #if defined(_WIN32) &&                                                         \
-    (defined(__arm__) || defined(__aarch64__) || defined(__arm64ec__))
+    (defined(__arm__) || defined(__aarch64__) || defined(__arm64ec__) || defined(__riscv))
   FlushInstructionCache(GetCurrentProcess(), start, end - start);
 #elif __i386__ || __x86_64__ || defined(_M_IX86) || defined(_M_X64)
 // Intel processors have a unified instruction and data cache

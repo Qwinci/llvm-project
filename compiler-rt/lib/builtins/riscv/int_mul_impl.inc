@@ -14,11 +14,13 @@
 #error "__mulxi3 must be defined to use this generic implementation"
 #endif
 
+#include "../assembly.h"
+
 	.text
 	.align 2
 
 	.globl __mulxi3
-	.type  __mulxi3, @function
+	SYMBOL_IS_FUNC(__mulxi3)
 __mulxi3:
 	mv     a2, a0
 	mv     a0, zero

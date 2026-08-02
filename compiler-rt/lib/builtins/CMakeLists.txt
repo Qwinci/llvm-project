@@ -857,6 +857,9 @@ set(riscv64_SOURCES
   riscv/muldi3.S
   ${riscv_SOURCES}
 )
+if (MINGW)
+  list(APPEND riscv64_SOURCES riscv/chkstk.S)
+endif()
 
 set(sparc_SOURCES ${GENERIC_SOURCES} ${GENERIC_TF_SOURCES})
 set(sparcv9_SOURCES ${GENERIC_SOURCES} ${GENERIC_TF_SOURCES})

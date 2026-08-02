@@ -14,6 +14,8 @@
 // is the minimum grouping which will maintain the required 16-byte stack
 // alignment.
 
+#include "../assembly.h"
+
   .text
 
 #if __riscv_xlen == 32
@@ -21,7 +23,7 @@
 #ifndef __riscv_abi_rve
 
   .globl  __riscv_save_12
-  .type   __riscv_save_12,@function
+  SYMBOL_IS_FUNC(__riscv_save_12)
 __riscv_save_12:
   addi   sp, sp, -64
   mv     t1, zero
@@ -29,13 +31,13 @@ __riscv_save_12:
   j      .Lriscv_save_11_8
 
   .globl  __riscv_save_11
-  .type   __riscv_save_11,@function
+  SYMBOL_IS_FUNC(__riscv_save_11)
   .globl  __riscv_save_10
-  .type   __riscv_save_10,@function
+  SYMBOL_IS_FUNC(__riscv_save_10)
   .globl  __riscv_save_9
-  .type   __riscv_save_9,@function
+  SYMBOL_IS_FUNC(__riscv_save_9)
   .globl  __riscv_save_8
-  .type   __riscv_save_8,@function
+  SYMBOL_IS_FUNC(__riscv_save_8)
 __riscv_save_11:
 __riscv_save_10:
 __riscv_save_9:
@@ -50,13 +52,13 @@ __riscv_save_8:
   j      .Lriscv_save_7_4
 
   .globl  __riscv_save_7
-  .type   __riscv_save_7,@function
+  SYMBOL_IS_FUNC(__riscv_save_7)
   .globl  __riscv_save_6
-  .type   __riscv_save_6,@function
+  SYMBOL_IS_FUNC(__riscv_save_6)
   .globl  __riscv_save_5
-  .type   __riscv_save_5,@function
+  SYMBOL_IS_FUNC(__riscv_save_5)
   .globl  __riscv_save_4
-  .type   __riscv_save_4,@function
+  SYMBOL_IS_FUNC(__riscv_save_4)
 __riscv_save_7:
 __riscv_save_6:
 __riscv_save_5:
@@ -76,13 +78,13 @@ __riscv_save_4:
   jr     t0
 
   .globl  __riscv_save_3
-  .type   __riscv_save_3,@function
+  SYMBOL_IS_FUNC(__riscv_save_3)
   .globl  __riscv_save_2
-  .type   __riscv_save_2,@function
+  SYMBOL_IS_FUNC(__riscv_save_2)
   .globl  __riscv_save_1
-  .type   __riscv_save_1,@function
+  SYMBOL_IS_FUNC(__riscv_save_1)
   .globl  __riscv_save_0
-  .type   __riscv_save_0,@function
+  SYMBOL_IS_FUNC(__riscv_save_0)
 __riscv_save_3:
 __riscv_save_2:
 __riscv_save_1:
@@ -97,7 +99,7 @@ __riscv_save_0:
 #else
 
   .globl  __riscv_save_2
-  .type   __riscv_save_2,@function
+  SYMBOL_IS_FUNC(__riscv_save_2)
 __riscv_save_2:
   addi    sp, sp, -12
   sw      s1,  0(sp)
@@ -106,7 +108,7 @@ __riscv_save_2:
   jr      t0
 
   .globl  __riscv_save_1
-  .type   __riscv_save_1,@function
+  SYMBOL_IS_FUNC(__riscv_save_1)
 __riscv_save_1:
   addi    sp, sp, -8
   sw      s0,  0(sp)
@@ -114,7 +116,7 @@ __riscv_save_1:
   jr      t0
 
   .globl  __riscv_save_0
-  .type   __riscv_save_0,@function
+  SYMBOL_IS_FUNC(__riscv_save_0)
 __riscv_save_0:
   addi    sp, sp, -4
   sw      ra,  0(sp)
@@ -127,7 +129,7 @@ __riscv_save_0:
 #ifndef __riscv_abi_rve
 
   .globl  __riscv_save_12
-  .type   __riscv_save_12,@function
+  SYMBOL_IS_FUNC(__riscv_save_12)
 __riscv_save_12:
   addi   sp, sp, -112
   mv     t1, zero
@@ -135,9 +137,9 @@ __riscv_save_12:
   j      .Lriscv_save_11_10
 
   .globl  __riscv_save_11
-  .type   __riscv_save_11,@function
+  SYMBOL_IS_FUNC(__riscv_save_11)
   .globl  __riscv_save_10
-  .type   __riscv_save_10,@function
+  SYMBOL_IS_FUNC(__riscv_save_10)
 __riscv_save_11:
 __riscv_save_10:
   addi   sp, sp, -112
@@ -148,9 +150,9 @@ __riscv_save_10:
   j      .Lriscv_save_9_8
 
   .globl  __riscv_save_9
-  .type   __riscv_save_9,@function
+  SYMBOL_IS_FUNC(__riscv_save_9)
   .globl  __riscv_save_8
-  .type   __riscv_save_8,@function
+  SYMBOL_IS_FUNC(__riscv_save_8)
 __riscv_save_9:
 __riscv_save_8:
   addi   sp, sp, -112
@@ -161,9 +163,9 @@ __riscv_save_8:
   j      .Lriscv_save_7_6
 
   .globl  __riscv_save_7
-  .type   __riscv_save_7,@function
+  SYMBOL_IS_FUNC(__riscv_save_7)
   .globl  __riscv_save_6
-  .type   __riscv_save_6,@function
+  SYMBOL_IS_FUNC(__riscv_save_6)
 __riscv_save_7:
 __riscv_save_6:
   addi   sp, sp, -112
@@ -174,9 +176,9 @@ __riscv_save_6:
   j      .Lriscv_save_5_4
 
   .globl  __riscv_save_5
-  .type   __riscv_save_5,@function
+  SYMBOL_IS_FUNC(__riscv_save_5)
   .globl  __riscv_save_4
-  .type   __riscv_save_4,@function
+  SYMBOL_IS_FUNC(__riscv_save_4)
 __riscv_save_5:
 __riscv_save_4:
   addi   sp, sp, -112
@@ -187,9 +189,9 @@ __riscv_save_4:
   j      .Lriscv_save_3_2
 
   .globl  __riscv_save_3
-  .type   __riscv_save_3,@function
+  SYMBOL_IS_FUNC(__riscv_save_3)
   .globl  __riscv_save_2
-  .type   __riscv_save_2,@function
+  SYMBOL_IS_FUNC(__riscv_save_2)
 __riscv_save_3:
 __riscv_save_2:
   addi   sp, sp, -112
@@ -203,9 +205,9 @@ __riscv_save_2:
   jr     t0
 
   .globl  __riscv_save_1
-  .type   __riscv_save_1,@function
+  SYMBOL_IS_FUNC(__riscv_save_1)
   .globl  __riscv_save_0
-  .type   __riscv_save_0,@function
+  SYMBOL_IS_FUNC(__riscv_save_0)
 __riscv_save_1:
 __riscv_save_0:
   addi   sp, sp, -16
@@ -216,7 +218,7 @@ __riscv_save_0:
 #else
 
   .globl  __riscv_save_2
-  .type   __riscv_save_2,@function
+  SYMBOL_IS_FUNC(__riscv_save_2)
 __riscv_save_2:
   addi    sp, sp, -24
   sw      s1, 0(sp)
@@ -225,7 +227,7 @@ __riscv_save_2:
   jr      t0
 
   .globl  __riscv_save_1
-  .type   __riscv_save_1,@function
+  SYMBOL_IS_FUNC(__riscv_save_1)
 __riscv_save_1:
   addi    sp, sp, -16
   sw      s0, 0(sp)
@@ -233,7 +235,7 @@ __riscv_save_1:
   jr      t0
 
   .globl  __riscv_save_0
-  .type   __riscv_save_0,@function
+  SYMBOL_IS_FUNC(__riscv_save_0)
 __riscv_save_0:
   addi    sp, sp, -8
   sw      ra,  0(sp)
