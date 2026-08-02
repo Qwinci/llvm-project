@@ -34,6 +34,10 @@ public:
   StackOffset getFrameIndexReference(const MachineFunction &MF, int FI,
                                      Register &FrameReg) const override;
 
+  StackOffset getFrameIndexReferencePreferSP(const MachineFunction &MF, int FI,
+                                             Register &FrameReg,
+                                             bool IgnoreSPUpdates) const override;
+
   void determineCalleeSaves(MachineFunction &MF, BitVector &SavedRegs,
                             RegScavenger *RS) const override;
 
@@ -41,6 +45,10 @@ public:
                                            RegScavenger *RS) const override;
 
   bool hasBP(const MachineFunction &MF) const;
+
+  // Reserve and initialize the fixed stack objects (catch objects + UnwindHelp)
+  // used by Windows funclet-based C++ exception handling.
+  void emitWinEHFixedObjects(MachineFunction &MF, RegScavenger *RS) const;
 
   bool hasReservedCallFrame(const MachineFunction &MF) const override;
   MachineBasicBlock::iterator
@@ -74,6 +82,8 @@ public:
   bool isSupportedStackID(TargetStackID::Value ID) const override;
   TargetStackID::Value getStackIDForScalableVectors() const override;
 
+  unsigned getWinEHParentFrameOffset(const MachineFunction &MF) const override;
+
   bool isStackIdSafeForLocalArea(unsigned StackId) const override {
     // We don't support putting RISC-V Vector objects into the pre-allocated
     // local frame block at the moment.
@@ -85,6 +95,13 @@ public:
                      uint64_t RealStackSize, bool EmitCFI, bool NeedProbe,
                      uint64_t ProbeSize, bool DynAllocation,
                      MachineInstr::MIFlag Flag) const;
+
+  // Whether allocating StackSizeInBytes bytes requires a call to the
+  // out-of-line __chkstk routine to probe the intervening guard pages. As on
+  // every other Windows target this is unconditional, not opt-in, for frames
+  // at or above the guard page size.
+  bool windowsRequiresStackProbe(const MachineFunction &MF,
+                                 uint64_t StackSizeInBytes) const;
 
 protected:
   const RISCVSubtarget &STI;
@@ -110,6 +127,12 @@ private:
   // Replace a StackProbe stub (if any) with the actual probe code inline
   void inlineStackProbe(MachineFunction &MF,
                         MachineBasicBlock &PrologueMBB) const override;
+  // Emit a call to the out-of-line __chkstk routine to probe Offset bytes of
+  // new stack, then adjust SP down by Offset.
+  void emitWindowsChkstkCall(MachineBasicBlock &MBB,
+                             MachineBasicBlock::iterator MBBI,
+                             const DebugLoc &DL, uint64_t Offset,
+                             MachineInstr::MIFlag Flag) const;
   void allocateAndProbeStackForRVV(MachineFunction &MF, MachineBasicBlock &MBB,
                                    MachineBasicBlock::iterator MBBI,
                                    const DebugLoc &DL, int64_t Amount,

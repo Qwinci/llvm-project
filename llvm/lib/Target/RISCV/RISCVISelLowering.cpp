@@ -7782,6 +7782,8 @@ SDValue RISCVTargetLowering::LowerOperation(SDValue Op,
     return lowerFRAMEADDR(Op, DAG);
   case ISD::RETURNADDR:
     return lowerRETURNADDR(Op, DAG);
+  case ISD::ADDROFRETURNADDR:
+    return lowerADDROFRETURNADDR(Op, DAG);
   case ISD::SHL_PARTS:
     return lowerShiftLeftParts(Op, DAG);
   case ISD::SRA_PARTS:
@@ -9293,7 +9295,12 @@ SDValue RISCVTargetLowering::getAddr(NodeTy *N, SelectionDAG &DAG,
   // mode.
   if (isPositionIndependent() || Subtarget.allowTaggedGlobals()) {
     SDValue Addr = getTargetNode(N, DL, Ty, DAG, 0);
-    if (IsLocal && !Subtarget.allowTaggedGlobals())
+    // COFF has no GOT: %got_pcrel_hi has no COFF relocation and is rejected by
+    // the MC layer. Non-dso-local globals are redirected to a __imp_/.refptr
+    // indirection earlier in lowerGlobalAddress, so anything reaching here is
+    // effectively local; use direct pc-relative addressing for it.
+    bool UseDirect = IsLocal || Subtarget.getTargetTriple().isOSBinFormatCOFF();
+    if (UseDirect && !Subtarget.allowTaggedGlobals())
       // Use PC-relative addressing to access the symbol. This generates the
       // pattern (PseudoLLA sym), which expands to (addi (auipc %pcrel_hi(sym))
       // %pcrel_lo(auipc)).
@@ -9373,6 +9380,39 @@ SDValue RISCVTargetLowering::lowerGlobalAddress(SDValue Op,
   GlobalAddressSDNode *N = cast<GlobalAddressSDNode>(Op);
   assert(N->getOffset() == 0 && "unexpected offset in global node");
   const GlobalValue *GV = N->getGlobal();
+
+  // On COFF/Windows, a reference to a non-dso-local global cannot use the
+  // direct %pcrel_hi/%pcrel_lo pair: COFF has no GOT, and that split pair
+  // cannot be resolved at load time (neither by an import, nor by the mingw
+  // auto-import runtime-pseudo-relocation mechanism, which patches only a
+  // single pointer-sized slot). Load the address from an indirection instead:
+  // __imp_<sym> for dllimport, or a local .refptr.<sym> stub otherwise -- both
+  // ordinary pointer slots. Whether a global needs this is exactly
+  // !shouldAssumeDSOLocal (auto-importable variable declarations, dllimport and
+  // extern_weak all say no), matching AArch64/X86's ClassifyGlobalReference.
+  if (Subtarget.getTargetTriple().isOSBinFormatCOFF() &&
+      !getTargetMachine().shouldAssumeDSOLocal(GV)) {
+    SDLoc DL(N);
+    EVT Ty = getPointerTy(DAG.getDataLayout());
+    unsigned StubFlag = GV->hasDLLImportStorageClass() ? RISCVII::MO_DLLIMPORT
+                                                       : RISCVII::MO_COFFSTUB;
+    SDValue Addr = DAG.getTargetGlobalAddress(GV, DL, Ty, /*offset=*/0,
+                                              StubFlag);
+    // PseudoLGA emits (ld (addi (auipc %pcrel_hi(stub)) %pcrel_lo)); the stub
+    // flag rides along so RISCVAsmPrinter redirects the symbol to the
+    // __imp_/.refptr pointer.
+    SDValue Load =
+        SDValue(DAG.getMachineNode(RISCV::PseudoLGA, DL, Ty, Addr), 0);
+    MachineFunction &MF = DAG.getMachineFunction();
+    MachineMemOperand *MemOp = MF.getMachineMemOperand(
+        MachinePointerInfo::getGOT(MF),
+        MachineMemOperand::MOLoad | MachineMemOperand::MODereferenceable |
+            MachineMemOperand::MOInvariant,
+        LLT(Ty.getSimpleVT()), Align(Ty.getFixedSizeInBits() / 8));
+    DAG.setNodeMemRefs(cast<MachineSDNode>(Load.getNode()), {MemOp});
+    return Load;
+  }
+
   return getAddr(N, DAG, GV->isDSOLocal(), GV->hasExternalWeakLinkage());
 }
 
@@ -9490,10 +9530,74 @@ SDValue RISCVTargetLowering::getTLSDescAddr(GlobalAddressSDNode *N,
   return SDValue(DAG.getMachineNode(RISCV::PseudoLA_TLSDESC, DL, Ty, Addr), 0);
 }
 
+// Windows has no __tls_get_addr and no linker-mediated relaxation between TLS
+// models: every access uses the same fixed sequence, as on AArch64 and x86-64.
+//   1. Read the thread's TEB pointer. AArch64 reserves x18 for this and x86-64
+//      uses the %gs segment; here `tp` (x4), already reserved by this target as
+//      the thread pointer, holds the TEB. The OS/CRT thread-startup code is
+//      responsible for setting it, the same runtime contract ELF relies on for
+//      tp.
+//   2. Load ThreadLocalStoragePointer from the TEB at offset 0x58 (the TEB
+//      layout is OS-defined, so this matches AArch64/x86-64) to reach
+//      `_tls_array`, the current thread's array of per-module TLS bases.
+//   3. Load `_tls_index`, the module's slot index assigned by the loader, and
+//      index `_tls_array` with it to get this module's .tls$ base.
+//   4. Add the symbol's offset within .tls$, materialized by the
+//      tls_secrel_hi/tls_secrel_lo pair: an ordinary lui+addi, but not
+//      pc-relative, since it is added to a base computed at runtime.
+SDValue
+RISCVTargetLowering::lowerWindowsGlobalTLSAddress(GlobalAddressSDNode *N,
+                                                  SelectionDAG &DAG) const {
+  SDLoc DL(N);
+  EVT Ty = getPointerTy(DAG.getDataLayout());
+  MVT XLenVT = Subtarget.getXLenVT();
+  SDValue Chain = DAG.getEntryNode();
+
+  SDValue TEB = DAG.getRegister(RISCV::X4, XLenVT);
+
+  // A pointer to the TLS array is located at offset 0x58 from the TEB.
+  SDValue TLSArrayAddr =
+      DAG.getNode(ISD::ADD, DL, Ty, TEB, DAG.getConstant(0x58, DL, Ty));
+  SDValue TLSArray =
+      DAG.getLoad(Ty, DL, Chain, TLSArrayAddr, MachinePointerInfo());
+  Chain = TLSArray.getValue(1);
+
+  // Load the TLS index provided by the CRT at load time.
+  SDValue IndexAddr =
+      SDValue(DAG.getMachineNode(RISCV::PseudoLLA, DL, Ty,
+                                 DAG.getTargetExternalSymbol("_tls_index", Ty)),
+              0);
+  SDValue Index = DAG.getExtLoad(ISD::ZEXTLOAD, DL, Ty, Chain, IndexAddr,
+                                 MachinePointerInfo(), MVT::i32);
+  Chain = Index.getValue(1);
+
+  // Index into the TLS array (each entry is a pointer) to get this module's
+  // TLS data area for the current thread.
+  SDValue Slot =
+      DAG.getNode(ISD::SHL, DL, Ty, Index, DAG.getConstant(3, DL, XLenVT));
+  SDValue TLSBaseAddr = DAG.getNode(ISD::ADD, DL, Ty, TLSArray, Slot);
+  SDValue TLSBase =
+      DAG.getLoad(Ty, DL, Chain, TLSBaseAddr, MachinePointerInfo());
+
+  // Materialize this variable's offset within .tls$ and add it to the
+  // module's TLS base.
+  const GlobalValue *GV = N->getGlobal();
+  SDValue AddrHi =
+      DAG.getTargetGlobalAddress(GV, DL, Ty, 0, RISCVII::MO_TLS_SECREL_HI);
+  SDValue AddrLo =
+      DAG.getTargetGlobalAddress(GV, DL, Ty, 0, RISCVII::MO_TLS_SECREL_LO);
+  SDValue Hi = DAG.getNode(RISCVISD::HI, DL, Ty, AddrHi);
+  SDValue Offset = DAG.getNode(RISCVISD::ADD_LO, DL, Ty, Hi, AddrLo);
+  return DAG.getNode(ISD::ADD, DL, Ty, TLSBase, Offset);
+}
+
 SDValue RISCVTargetLowering::lowerGlobalTLSAddress(SDValue Op,
                                                    SelectionDAG &DAG) const {
   GlobalAddressSDNode *N = cast<GlobalAddressSDNode>(Op);
   assert(N->getOffset() == 0 && "unexpected offset in global node");
+
+  if (Subtarget.getTargetTriple().isOSBinFormatCOFF())
+    return lowerWindowsGlobalTLSAddress(N, DAG);
 
   if (DAG.getTarget().useEmulatedTLS())
     return LowerToTLSEmulatedModel(N, DAG);
@@ -10107,6 +10211,26 @@ SDValue RISCVTargetLowering::lowerRETURNADDR(SDValue Op,
   // live-in.
   Register Reg = MF.addLiveIn(RI.getRARegister(), getRegClassFor(XLenVT));
   return DAG.getCopyFromReg(DAG.getEntryNode(), DL, Reg, XLenVT);
+}
+
+SDValue RISCVTargetLowering::lowerADDROFRETURNADDR(SDValue Op,
+                                                   SelectionDAG &DAG) const {
+  const RISCVRegisterInfo &RI = *Subtarget.getRegisterInfo();
+  MachineFunction &MF = DAG.getMachineFunction();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  MFI.setFrameAddressIsTaken(true);
+  Register FrameReg = RI.getFrameRegister(MF);
+  int XLenInBytes = Subtarget.getXLen() / 8;
+
+  // With a frame pointer, s0 points at the CFA and the return address is spilled
+  // to the word just below it, so its address is FrameReg - XLen/8 (mirroring
+  // the slot lowerRETURNADDR loads from for the caller's frame).
+  EVT VT = Op.getValueType();
+  SDLoc DL(Op);
+  SDValue FrameAddr = DAG.getCopyFromReg(DAG.getEntryNode(), DL, FrameReg, VT);
+  SDValue Offset =
+      DAG.getSignedConstant(-XLenInBytes, DL, getPointerTy(DAG.getDataLayout()));
+  return DAG.getNode(ISD::ADD, DL, VT, FrameAddr, Offset);
 }
 
 SDValue RISCVTargetLowering::lowerShiftLeftParts(SDValue Op,
@@ -11297,6 +11421,38 @@ SDValue RISCVTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
   case Intrinsic::thread_pointer: {
     EVT PtrVT = getPointerTy(DAG.getDataLayout());
     return DAG.getRegister(RISCV::X4, PtrVT);
+  }
+  case Intrinsic::localaddress: {
+    // Return the register that escaped-local offsets (llvm.localescape, i.e.
+    // getFrameIndexReference) are relative to, so llvm.localrecover in a funclet
+    // resolves them against the right base. Mirrors getFrameIndexReference's own
+    // base-register choice, and AArch64's getLocalAddressRegister.
+    MachineFunction &MF = DAG.getMachineFunction();
+    const MachineFrameInfo &MFI = MF.getFrameInfo();
+    const RISCVRegisterInfo *RI = Subtarget.getRegisterInfo();
+    Register Reg;
+    if (!MF.hasEHFunclets() && !MFI.hasVarSizedObjects())
+      Reg = RISCV::X2; // sp
+    else if (Subtarget.getFrameLowering()->hasBP(MF))
+      Reg = RISCVABI::getBPReg(); // s1, for a realigned frame with a base ptr
+    else
+      Reg = RI->getFrameRegister(MF); // s0 (fp), or sp when there is no fp
+    return DAG.getCopyFromReg(DAG.getEntryNode(), DL, Reg,
+                              Op.getSimpleValueType());
+  }
+  case Intrinsic::eh_recoverfp: {
+    // The incoming establisher-frame value is already the parent's SEH frame
+    // pointer (see RISCVFrameLowering's SEH_SetFrame handling and
+    // WinException::emitCSpecificHandlerTable's ParentFrameOffset), so no
+    // further adjustment is needed. Matches AArch64.
+    SDValue FnOp = Op.getOperand(1);
+    SDValue IncomingFPOp = Op.getOperand(2);
+    GlobalAddressSDNode *GSD = dyn_cast<GlobalAddressSDNode>(FnOp);
+    auto *Fn = dyn_cast_or_null<Function>(GSD ? GSD->getGlobal() : nullptr);
+    if (!Fn)
+      report_fatal_error(
+          "llvm.eh.recoverfp must take a function as the first argument");
+    return IncomingFPOp;
   }
   case Intrinsic::riscv_orc_b:
   case Intrinsic::riscv_brev8:
@@ -25332,6 +25488,8 @@ Register RISCVTargetLowering::getExceptionSelectorRegister(
   return RISCV::X11;
 }
 
+bool RISCVTargetLowering::needsFixedCatchObjects() const { return true; }
+
 bool RISCVTargetLowering::shouldExtendTypeInLibCall(EVT Type) const {
   // Return false to suppress the unnecessary extensions if the LibCall
   // arguments or return value is a float narrower than XLEN on a soft FP ABI.
@@ -25707,6 +25865,35 @@ Value *RISCVTargetLowering::getIRStackGuard(IRBuilderBase &IRB) const {
   }
 
   return TargetLowering::getIRStackGuard(IRB);
+}
+
+void RISCVTargetLowering::insertSSPDeclarations(Module &M) const {
+  // MSVC CRT provides functionalities for stack protection through the
+  // __security_cookie global and the __security_check_cookie validator, rather
+  // than the __stack_chk_guard/__stack_chk_fail pair used on other OSes. The
+  // generic implementation only declares the guard variable, so declare the
+  // check function here too when both are configured (see RISCVSystemLibrary in
+  // RuntimeLibcalls.td). Mirrors AArch64.
+  RTLIB::LibcallImpl SecurityCheckCookie =
+      getLibcallImpl(RTLIB::SECURITY_CHECK_COOKIE);
+  RTLIB::LibcallImpl SecurityCookieVar =
+      getLibcallImpl(RTLIB::STACK_CHECK_GUARD);
+  if (SecurityCheckCookie != RTLIB::Unsupported &&
+      SecurityCookieVar != RTLIB::Unsupported) {
+    // MSVC CRT has a global variable holding the security cookie.
+    M.getOrInsertGlobal(getLibcallImplName(SecurityCookieVar),
+                        PointerType::getUnqual(M.getContext()));
+
+    // MSVC CRT has a function to validate the security cookie; it takes the
+    // cookie as its sole argument, passed in the first argument register (a0).
+    FunctionCallee SecurityCheckCookieFn = M.getOrInsertFunction(
+        getLibcallImplName(SecurityCheckCookie), Type::getVoidTy(M.getContext()),
+        PointerType::getUnqual(M.getContext()));
+    if (Function *F = dyn_cast<Function>(SecurityCheckCookieFn.getCallee()))
+      F->addParamAttr(0, Attribute::AttrKind::InReg);
+    return;
+  }
+  TargetLowering::insertSSPDeclarations(M);
 }
 
 bool RISCVTargetLowering::isLegalStridedLoadStore(EVT DataType,

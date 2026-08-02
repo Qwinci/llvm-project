@@ -23,7 +23,9 @@ class MCCodeEmitter;
 class MCContext;
 class MCInstrInfo;
 class MCObjectTargetWriter;
+class MCObjectWriter;
 class MCRegisterInfo;
+class MCStreamer;
 class MCSubtargetInfo;
 class Target;
 
@@ -38,6 +40,16 @@ std::unique_ptr<MCObjectTargetWriter> createRISCVELFObjectWriter(uint8_t OSABI,
                                                                  bool Is64Bit);
 std::unique_ptr<MCObjectTargetWriter>
 createRISCVMachObjectWriter(uint32_t CPUType, uint32_t CPUSubtype);
+std::unique_ptr<MCObjectTargetWriter> createRISCVWinCOFFObjectWriter();
+
+MCStreamer *createRISCVWinCOFFStreamer(MCContext &C,
+                                       std::unique_ptr<MCAsmBackend> &&AB,
+                                       std::unique_ptr<MCObjectWriter> &&OW,
+                                       std::unique_ptr<MCCodeEmitter> &&CE);
+
+namespace RISCV_MC {
+void initLLVMToCVRegMapping(MCRegisterInfo *MRI);
+} // namespace RISCV_MC
 
 } // namespace llvm
 

@@ -140,6 +140,7 @@ enum class PDB_Machine {
   PowerPC = 0x1F0,
   PowerPCFP = 0x1F1,
   R4000 = 0x166,
+  RISCV64 = 0x5064,
   SH3 = 0x1A2,
   SH3DSP = 0x1A3,
   SH4 = 0x1A6,

@@ -48,6 +48,14 @@ enum Fixups {
   // pair composed of adjacent auipc+jalr instructions.
   fixup_riscv_call_plt,
 
+  // 20-bit fixup corresponding to %tls_secrel_hi(foo) for instructions like
+  // lui: the high bits of foo's link-time offset within its .tls$ section.
+  // Windows only; see RISCVISelLowering's lowerWindowsGlobalTLSAddress.
+  fixup_riscv_tls_secrel_hi20,
+  // 12-bit fixup corresponding to %tls_secrel_lo(foo) for instructions like
+  // addi: the low bits of the same offset.
+  fixup_riscv_tls_secrel_lo12_i,
+
   // Qualcomm specific fixups
   // 12-bit fixup for symbol references in the 48-bit Xqcibi branch immediate
   // instructions

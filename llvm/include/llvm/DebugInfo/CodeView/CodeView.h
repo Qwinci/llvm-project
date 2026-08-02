@@ -136,6 +136,9 @@ enum class CPUType : uint16_t {
   HybridX86ARM64 = 0xf7,
   ARM64EC = 0xf8,
   ARM64X = 0xf9,
+  // Microsoft has not assigned a CV_CPU_TYPE_e value for RISCV64; this one is
+  // LLVM's own, continuing the sequence above. See llvm/docs/RISCVWinCFI.md.
+  RISCV64 = 0xfa,
   Unknown = 0xff,
   D3D11_Shader = 0x100,
 };

@@ -236,6 +236,12 @@ class RISCVAsmParser : public MCTargetAsmParser {
   bool parseDirectiveAttribute();
   bool parseDirectiveInsn(SMLoc L);
   bool parseDirectiveVariantCC();
+  bool parseDirectiveSEHSetFrame(SMLoc L);
+  bool parseDirectiveSEHSaveReg(SMLoc L);
+  bool parseDirectiveSEHSaveFReg(SMLoc L);
+  bool parseDirectiveSEHTrapFrame(SMLoc L);
+  bool parseDirectiveSEHContext(SMLoc L);
+  bool parseDirectiveSEHClearUnwoundToCall(SMLoc L);
 
   /// Helper to reset target features for a new arch string. It
   /// also records the new arch string that is expanded by RISCVISAInfo
@@ -867,7 +873,8 @@ public:
     return RISCVAsmParser::classifySymbolRef(getExpr(), VK) &&
            (VK == RISCV::S_LO || VK == RISCV::S_PCREL_LO ||
             VK == RISCV::S_TPREL_LO || VK == ELF::R_RISCV_TLSDESC_LOAD_LO12 ||
-            VK == ELF::R_RISCV_TLSDESC_ADD_LO12);
+            VK == ELF::R_RISCV_TLSDESC_ADD_LO12 ||
+            VK == RISCV::S_TLS_SECREL_LO);
   }
 
   bool isSImm12Lsb00000() const {
@@ -913,7 +920,8 @@ public:
 
     RISCV::Specifier VK = RISCV::S_None;
     return RISCVAsmParser::classifySymbolRef(getExpr(), VK) &&
-           (VK == ELF::R_RISCV_HI20 || VK == ELF::R_RISCV_TPREL_HI20);
+           (VK == ELF::R_RISCV_HI20 || VK == ELF::R_RISCV_TPREL_HI20 ||
+            VK == RISCV::S_TLS_SECREL_HI);
   }
 
   bool isUImm20AUIPC() const {
@@ -3014,6 +3022,18 @@ ParseStatus RISCVAsmParser::parseDirective(AsmToken DirectiveID) {
     return parseDirectiveInsn(DirectiveID.getLoc());
   if (IDVal == ".variant_cc")
     return parseDirectiveVariantCC();
+  if (IDVal == ".seh_setframe")
+    return parseDirectiveSEHSetFrame(DirectiveID.getLoc());
+  if (IDVal == ".seh_savereg")
+    return parseDirectiveSEHSaveReg(DirectiveID.getLoc());
+  if (IDVal == ".seh_savefreg")
+    return parseDirectiveSEHSaveFReg(DirectiveID.getLoc());
+  if (IDVal == ".seh_trap_frame")
+    return parseDirectiveSEHTrapFrame(DirectiveID.getLoc());
+  if (IDVal == ".seh_context")
+    return parseDirectiveSEHContext(DirectiveID.getLoc());
+  if (IDVal == ".seh_clear_unwound_to_call")
+    return parseDirectiveSEHClearUnwoundToCall(DirectiveID.getLoc());
 
   return ParseStatus::NoMatch;
 }
@@ -3468,6 +3488,90 @@ bool RISCVAsmParser::parseDirectiveVariantCC() {
     return true;
   getTargetStreamer().emitDirectiveVariantCC(
       *getContext().getOrCreateSymbol(Name));
+  return false;
+}
+
+// Windows SEH directives, taking the same "register, offset" operands as
+// X86's .seh_setframe/.seh_savereg. See llvm/docs/RISCVWinCFI.md.
+
+/// parseDirectiveSEHSetFrame
+///  ::= .seh_setframe reg, offset
+bool RISCVAsmParser::parseDirectiveSEHSetFrame(SMLoc L) {
+  MCRegister Reg;
+  SMLoc StartLoc, EndLoc;
+  if (parseRegister(Reg, StartLoc, EndLoc))
+    return Error(StartLoc, "expected register");
+  if (getParser().parseComma())
+    return true;
+  int64_t Offset;
+  if (getParser().parseAbsoluteExpression(Offset))
+    return true;
+  if (parseEOL())
+    return true;
+  getTargetStreamer().emitRISCVWinCFISetFrame(Reg, Offset, L);
+  return false;
+}
+
+/// parseDirectiveSEHSaveReg
+///  ::= .seh_savereg reg, offset
+bool RISCVAsmParser::parseDirectiveSEHSaveReg(SMLoc L) {
+  MCRegister Reg;
+  SMLoc StartLoc, EndLoc;
+  if (parseRegister(Reg, StartLoc, EndLoc))
+    return Error(StartLoc, "expected register");
+  if (getParser().parseComma())
+    return true;
+  int64_t Offset;
+  if (getParser().parseAbsoluteExpression(Offset))
+    return true;
+  if (parseEOL())
+    return true;
+  getTargetStreamer().emitRISCVWinCFISaveReg(Reg, Offset, L);
+  return false;
+}
+
+/// parseDirectiveSEHSaveFReg
+///  ::= .seh_savefreg reg, offset
+bool RISCVAsmParser::parseDirectiveSEHSaveFReg(SMLoc L) {
+  MCRegister Reg;
+  SMLoc StartLoc, EndLoc;
+  if (parseRegister(Reg, StartLoc, EndLoc))
+    return Error(StartLoc, "expected register");
+  if (getParser().parseComma())
+    return true;
+  int64_t Offset;
+  if (getParser().parseAbsoluteExpression(Offset))
+    return true;
+  if (parseEOL())
+    return true;
+  getTargetStreamer().emitRISCVWinCFISaveFReg(Reg, Offset, L);
+  return false;
+}
+
+/// parseDirectiveSEHTrapFrame
+///  ::= .seh_trap_frame
+bool RISCVAsmParser::parseDirectiveSEHTrapFrame(SMLoc L) {
+  if (parseEOL())
+    return true;
+  getTargetStreamer().emitRISCVWinCFITrapFrame(L);
+  return false;
+}
+
+/// parseDirectiveSEHContext
+///  ::= .seh_context
+bool RISCVAsmParser::parseDirectiveSEHContext(SMLoc L) {
+  if (parseEOL())
+    return true;
+  getTargetStreamer().emitRISCVWinCFIContext(L);
+  return false;
+}
+
+/// parseDirectiveSEHClearUnwoundToCall
+///  ::= .seh_clear_unwound_to_call
+bool RISCVAsmParser::parseDirectiveSEHClearUnwoundToCall(SMLoc L) {
+  if (parseEOL())
+    return true;
+  getTargetStreamer().emitRISCVWinCFIClearUnwoundToCall(L);
   return false;
 }
 

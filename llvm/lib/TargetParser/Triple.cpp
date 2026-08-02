@@ -1013,7 +1013,6 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
   case Triple::renderscript32:
   case Triple::renderscript64:
   case Triple::riscv32:
-  case Triple::riscv64:
   case Triple::riscv32be:
   case Triple::riscv64be:
   case Triple::shave:
@@ -1034,6 +1033,15 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
     if (T.isOSWindows())
       return Triple::COFF;
     return Triple::ELF;
+
+  case Triple::riscv64:
+    switch (T.getOS()) {
+    case Triple::Win32:
+    case Triple::UEFI:
+      return Triple::COFF;
+    default:
+      return Triple::ELF;
+    }
 
   case Triple::ppc64:
   case Triple::ppc:

@@ -272,6 +272,7 @@ static std::string formatMachineType(CPUType Cpu) {
     RETURN_CASE(CPUType, ARM64, "arm64");
     RETURN_CASE(CPUType, ARM64EC, "arm64ec");
     RETURN_CASE(CPUType, ARM64X, "arm64x");
+    RETURN_CASE(CPUType, RISCV64, "riscv64");
     RETURN_CASE(CPUType, HybridX86ARM64, "hybrid x86 arm64");
     RETURN_CASE(CPUType, Omni, "omni");
     RETURN_CASE(CPUType, Ia64, "intel itanium ia64");
@@ -308,6 +309,17 @@ static std::string formatRegisterId(RegisterId Id, CPUType Cpu) {
 #include "llvm/DebugInfo/CodeView/CodeViewRegisters.def"
 #undef CV_REGISTER
 #undef CV_REGISTERS_ARM
+
+    default:
+      break;
+    }
+  } else if (Cpu == CPUType::RISCV64) {
+    switch (Id) {
+#define CV_REGISTERS_RISCV64
+#define CV_REGISTER(name, val) RETURN_CASE(RegisterId, name, #name)
+#include "llvm/DebugInfo/CodeView/CodeViewRegisters.def"
+#undef CV_REGISTER
+#undef CV_REGISTERS_RISCV64
 
     default:
       break;

@@ -46,6 +46,98 @@ static uint64_t getOffsetOfLSDA(const UnwindInfo& UI) {
          - reinterpret_cast<const char*>(&UI);
 }
 
+// RISCV64's on-disk opcode nibble (see riscv64OnDiskOp in MCWin64EH.cpp)
+// matches the real UnwindOpcodes ordinal for every value it uses except 5,
+// which x86_64 spells UOP_SaveNonVolBig but RISCV64 uses for
+// UOP_RISCVSaveFReg, whose own ordinal does not fit in 4 bits. Remapping it
+// here lets the switches below key off the UnwindOpcodes enum directly.
+static uint8_t effectiveUnwindOp(uint8_t RawOp, bool IsRISCV64) {
+  if (IsRISCV64) {
+    // RISCV64 packs a few opcodes into its own dense nibble range that does not
+    // match the shared UnwindOpcodes ordinal (see riscv64OnDiskOp). Remap them
+    // back so the switches below key off the enum directly.
+    switch (RawOp) {
+    case 5:
+      return UOP_RISCVSaveFReg;
+    case 6:
+      return UOP_TrapFrame;
+    case 7:
+      return UOP_Context;
+    case 8:
+      return UOP_ClearUnwoundToCall;
+    }
+  }
+  return RawOp;
+}
+
+// RISCV64 GPR names for UOP_SaveNonVol's register index, a packed 4-bit space
+// distinct from the physical register encoding (see llvm/docs/RISCVWinCFI.md).
+static StringRef getRISCVGPRName(uint8_t Reg) {
+  switch (Reg) {
+  default:
+    llvm_unreachable("Invalid register");
+  case 0:
+    return "ra";
+  case 1:
+    return "s0";
+  case 2:
+    return "s1";
+  case 3:
+    return "s2";
+  case 4:
+    return "s3";
+  case 5:
+    return "s4";
+  case 6:
+    return "s5";
+  case 7:
+    return "s6";
+  case 8:
+    return "s7";
+  case 9:
+    return "s8";
+  case 10:
+    return "s9";
+  case 11:
+    return "s10";
+  case 12:
+    return "s11";
+  }
+}
+
+// RISCV64 FPR names for UOP_RISCVSaveFReg's register index, a separate 4-bit
+// space that also starts at 0 (see llvm/docs/RISCVWinCFI.md).
+static StringRef getRISCVFPRName(uint8_t Reg) {
+  switch (Reg) {
+  default:
+    llvm_unreachable("Invalid register");
+  case 0:
+    return "fs0";
+  case 1:
+    return "fs1";
+  case 2:
+    return "fs2";
+  case 3:
+    return "fs3";
+  case 4:
+    return "fs4";
+  case 5:
+    return "fs5";
+  case 6:
+    return "fs6";
+  case 7:
+    return "fs7";
+  case 8:
+    return "fs8";
+  case 9:
+    return "fs9";
+  case 10:
+    return "fs10";
+  case 11:
+    return "fs11";
+  }
+}
+
 static uint32_t getLargeSlotValue(ArrayRef<UnwindCode> UC) {
   if (UC.size() < 3)
     return 0;
@@ -53,8 +145,8 @@ static uint32_t getLargeSlotValue(ArrayRef<UnwindCode> UC) {
 }
 
 // Returns the name of the unwind code.
-static StringRef getUnwindCodeTypeName(uint8_t Code) {
-  switch (Code) {
+static StringRef getUnwindCodeTypeName(uint8_t Code, bool IsRISCV64) {
+  switch (effectiveUnwindOp(Code, IsRISCV64)) {
   default: llvm_unreachable("Invalid unwind code");
   case UOP_PushNonVol: return "PUSH_NONVOL";
   case UOP_AllocLarge: return "ALLOC_LARGE";
@@ -65,6 +157,14 @@ static StringRef getUnwindCodeTypeName(uint8_t Code) {
   case UOP_SaveXMM128: return "SAVE_XMM128";
   case UOP_SaveXMM128Big: return "SAVE_XMM128_FAR";
   case UOP_PushMachFrame: return "PUSH_MACHFRAME";
+  case UOP_RISCVSaveFReg:
+    return "SAVE_FREG";
+  case UOP_TrapFrame:
+    return "TRAP_FRAME";
+  case UOP_Context:
+    return "CONTEXT";
+  case UOP_ClearUnwoundToCall:
+    return "CLEAR_UNWOUND_TO_CALL";
   case UOP_Epilog:
     return "EPILOG";
   }
@@ -94,17 +194,21 @@ static StringRef getUnwindRegisterName(uint8_t Reg) {
 }
 
 // Calculates the number of array slots required for the unwind code.
-static unsigned getNumUsedSlots(const UnwindCode &UnwindCode) {
-  switch (UnwindCode.getUnwindOp()) {
+static unsigned getNumUsedSlots(const UnwindCode &UnwindCode, bool IsRISCV64) {
+  switch (effectiveUnwindOp(UnwindCode.getUnwindOp(), IsRISCV64)) {
   default: llvm_unreachable("Invalid unwind code");
   case UOP_PushNonVol:
   case UOP_AllocSmall:
   case UOP_SetFPReg:
   case UOP_PushMachFrame:
+  case UOP_TrapFrame:
+  case UOP_Context:
+  case UOP_ClearUnwoundToCall:
   case UOP_Epilog:
     return 1;
   case UOP_SaveNonVol:
   case UOP_SaveXMM128:
+  case UOP_RISCVSaveFReg:
     return 2;
   case UOP_SaveNonVolBig:
   case UOP_SaveXMM128Big:
@@ -112,6 +216,20 @@ static unsigned getNumUsedSlots(const UnwindCode &UnwindCode) {
   case UOP_AllocLarge:
     return (UnwindCode.getOpInfo() == 0) ? 2 : 3;
   }
+}
+
+// Whether any code in UC is UOP_SetFPReg. RISCV64's UNWIND_INFO header has no
+// register field -- the whole byte is offset/16 -- and offset 0 is an ordinary
+// value there, not a sentinel the way x86_64's register index 0/RAX is. So a
+// frame pointer's presence must be read off the unwind-code list rather than
+// inferred from a zero header byte.
+static bool hasRISCVSetFPReg(ArrayRef<UnwindCode> UC) {
+  for (size_t I = 0; I < UC.size();
+       I += getNumUsedSlots(UC[I], /*IsRISCV64=*/true))
+    if (effectiveUnwindOp(UC[I].getUnwindOp(), /*IsRISCV64=*/true) ==
+        UOP_SetFPReg)
+      return true;
+  return false;
 }
 
 static std::error_code getSymbol(const COFFObjectFile &COFF, uint64_t VA,
@@ -259,12 +377,12 @@ void Dumper::printRuntimeFunctionEntry(const Context &Ctx,
 // slots is provided.
 void Dumper::printUnwindCode(const UnwindInfo &UI, ArrayRef<UnwindCode> UC,
                              bool &SeenFirstEpilog) {
-  assert(UC.size() >= getNumUsedSlots(UC[0]));
+  assert(UC.size() >= getNumUsedSlots(UC[0], IsRISCV64));
 
   SW.startLine() << format("0x%02X: ", unsigned(UC[0].u.CodeOffset))
-                 << getUnwindCodeTypeName(UC[0].getUnwindOp());
+                 << getUnwindCodeTypeName(UC[0].getUnwindOp(), IsRISCV64);
 
-  switch (UC[0].getUnwindOp()) {
+  switch (effectiveUnwindOp(UC[0].getUnwindOp(), IsRISCV64)) {
   case UOP_PushNonVol:
     OS << " reg=" << getUnwindRegisterName(UC[0].getOpInfo());
     break;
@@ -280,15 +398,25 @@ void Dumper::printUnwindCode(const UnwindInfo &UI, ArrayRef<UnwindCode> UC,
     break;
 
   case UOP_SetFPReg:
-    if (UI.getFrameRegister() == 0)
+    // RISCV64 has no register sub-field here: the frame register is always s0
+    // and the whole FrameRegisterAndOffset byte is offset/16. Reaching this
+    // case already means a UOP_SetFPReg code is present, so there is no
+    // "unset" state to test for the way x86_64 tests its register field.
+    if (IsRISCV64) {
+      OS << " reg=s0"
+         << format(", offset=0x%X", UI.FrameRegisterAndOffset * 16);
+    } else if (UI.getFrameRegister() == 0) {
       OS << " reg=<invalid>";
-    else
+    } else {
       OS << " reg=" << getUnwindRegisterName(UI.getFrameRegister())
          << format(", offset=0x%X", UI.getFrameOffset() * 16);
+    }
     break;
 
   case UOP_SaveNonVol:
-    OS << " reg=" << getUnwindRegisterName(UC[0].getOpInfo())
+    OS << " reg="
+       << (IsRISCV64 ? getRISCVGPRName(UC[0].getOpInfo())
+                     : getUnwindRegisterName(UC[0].getOpInfo()))
        << format(", offset=0x%X", UC[1].FrameOffset * 8);
     break;
 
@@ -309,6 +437,17 @@ void Dumper::printUnwindCode(const UnwindInfo &UI, ArrayRef<UnwindCode> UC,
 
   case UOP_PushMachFrame:
     OS << " errcode=" << (UC[0].getOpInfo() == 0 ? "no" : "yes");
+    break;
+
+  case UOP_RISCVSaveFReg:
+    OS << " reg=" << getRISCVFPRName(UC[0].getOpInfo())
+       << format(", offset=0x%X", UC[1].FrameOffset * 8);
+    break;
+
+  case UOP_TrapFrame:
+  case UOP_Context:
+  case UOP_ClearUnwoundToCall:
+    // Operand-less: the opcode name printed above is the whole record.
     break;
 
   case UOP_Epilog:
@@ -338,7 +477,19 @@ void Dumper::printUnwindInfo(const Context &Ctx, const coff_section *Section,
   SW.printNumber("Version", UI.getVersion());
   SW.printFlags("Flags", UI.getFlags(), ArrayRef(UnwindFlags));
   SW.printNumber("PrologSize", UI.PrologSize);
-  if (UI.getFrameRegister()) {
+  // RISCV64 packs no register here: the whole FrameRegisterAndOffset byte is
+  // offset/16, and 0 is an ordinary value rather than an "unset" sentinel, so
+  // scan the unwind codes for UOP_SetFPReg instead of testing the byte.
+  if (IsRISCV64) {
+    ArrayRef<UnwindCode> UC(&UI.UnwindCodes[0], UI.NumCodes);
+    if (hasRISCVSetFPReg(UC)) {
+      SW.printString("FrameRegister", StringRef("s0"));
+      SW.printHex("FrameOffset", UI.FrameRegisterAndOffset * 16);
+    } else {
+      SW.printString("FrameRegister", StringRef("-"));
+      SW.printString("FrameOffset", StringRef("-"));
+    }
+  } else if (UI.getFrameRegister()) {
     SW.printEnum("FrameRegister", UI.getFrameRegister(),
                  ArrayRef(UnwindOpInfo));
     SW.printHex("FrameOffset", UI.getFrameOffset());
@@ -353,7 +504,7 @@ void Dumper::printUnwindInfo(const Context &Ctx, const coff_section *Section,
     ArrayRef<UnwindCode> UC(&UI.UnwindCodes[0], UI.NumCodes);
     bool SeenFirstEpilog = false;
     for (const UnwindCode *UCI = UC.begin(), *UCE = UC.end(); UCI < UCE; ++UCI) {
-      unsigned UsedSlots = getNumUsedSlots(*UCI);
+      unsigned UsedSlots = getNumUsedSlots(*UCI, IsRISCV64);
       if (UsedSlots > UC.size()) {
         errs() << "corrupt unwind data";
         return;

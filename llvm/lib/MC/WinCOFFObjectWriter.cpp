@@ -52,8 +52,6 @@ using llvm::support::endian::write32le;
 
 namespace {
 
-constexpr int OffsetLabelIntervalBits = 20;
-
 using name = SmallString<COFF::NameSize>;
 
 enum AuxiliaryType { ATWeakExternal, ATFile, ATSectionDefinition };
@@ -146,6 +144,10 @@ class llvm::WinCOFFWriter {
 
   bool UseBigObj;
   bool UseOffsetLabels = false;
+  // Interval between offset label symbols. The residual addend a relocation
+  // carries in-place after being redirected to the nearest offset label is
+  // less than this interval, so it must fit the target's inline addend field.
+  int OffsetLabelIntervalBits = 20;
 
 public:
   enum DwoMode {
@@ -236,7 +238,18 @@ WinCOFFWriter::WinCOFFWriter(WinCOFFObjectWriter &OWriter,
   // limited range for the immediate offset (+/- 1 MB); create extra offset
   // label symbols with regular intervals to allow referencing a
   // non-temporary symbol that is close enough.
-  UseOffsetLabels = COFF::isAnyArm64(Header.Machine);
+  //
+  // RISCV64 has the same problem: a %pcrel_hi carries its byte addend in the
+  // auipc's signed 20-bit immediate (COFF has no relocation addend field, see
+  // RISCVAsmBackend::applyFixup), so a reference to a temporary symbol far into
+  // its section would otherwise overflow that field. Use a 2^19 interval so the
+  // residual addend stays within the *signed* 20-bit range the auipc can hold.
+  if (COFF::isAnyArm64(Header.Machine)) {
+    UseOffsetLabels = true;
+  } else if (Header.Machine == COFF::IMAGE_FILE_MACHINE_RISCV64) {
+    UseOffsetLabels = true;
+    OffsetLabelIntervalBits = 19;
+  }
 }
 
 COFFSymbol *WinCOFFWriter::createSymbol(StringRef Name) {

@@ -990,6 +990,22 @@ uint8_t *RuntimeDyldImpl::createStubFunction(uint8_t *Addr,
     // and stubs for branches Thumb - ARM and ARM - Thumb.
     writeBytesUnaligned(0xe51ff004, Addr, 4); // ldr pc, [pc, #-4]
     return Addr + 4;
+  } else if (Arch == Triple::riscv64) {
+    // The stub has to reach anywhere in the 64-bit address space, which no
+    // RISC-V branch or auipc+jalr pair can do, so load the target from a
+    // literal stored after the code. The literal sits at offset 16 so it is
+    // 8-byte aligned given an 8-byte aligned stub.
+    //
+    //   auipc t0, 0
+    //   ld    t0, 16(t0)
+    //   jr    t0
+    //   nop
+    //   <8-byte target address>
+    writeBytesUnaligned(0x00000297, Addr, 4);
+    writeBytesUnaligned(0x0102b283, Addr + 4, 4);
+    writeBytesUnaligned(0x00028067, Addr + 8, 4);
+    writeBytesUnaligned(0x00000013, Addr + 12, 4);
+    return Addr;
   } else if (Arch == Triple::loongarch64) {
     // lu12i.w  $t0, %abs_hi20(addr)
     // ori      $t0, $t0, %abs_lo12(addr)

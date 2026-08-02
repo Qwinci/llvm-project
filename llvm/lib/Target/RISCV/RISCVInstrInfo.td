@@ -2329,6 +2329,52 @@ let Predicates = [HasStdExtZihintpause] in
 def : Pat<(int_riscv_pause), (FENCE 0x1, 0x0)>;
 
 //===----------------------------------------------------------------------===//
+// Windows SEH pseudo instructions
+//===----------------------------------------------------------------------===//
+// Record the information RISCVAsmPrinter needs to emit the xdata unwind codes
+// described in llvm/docs/RISCVWinCFI.md, modeled on AArch64's SEH_* pseudos.
+// $reg operands hold a physical register number; the mapping to the compact
+// xdata register index happens later, in RISCVWinCOFFStreamer.
+// Size is 0 because these never lower to a real instruction, unlike most
+// RISC-V pseudos (whose shared `Pseudo` class defaults Size to 4), so they
+// must not count towards code-size estimation such as branch relaxation.
+let isPseudo = 1, Size = 0, hasSideEffects = 0, mayLoad = 0, mayStore = 0 in {
+  def SEH_StackAlloc : Pseudo<(outs), (ins i32imm:$size), []>, Sched<[]>;
+  def SEH_SaveReg : Pseudo<(outs), (ins i32imm:$reg, i32imm:$offs), []>, Sched<[]>;
+  def SEH_SaveFReg : Pseudo<(outs), (ins i32imm:$reg, i32imm:$offs), []>, Sched<[]>;
+  def SEH_SetFrame : Pseudo<(outs), (ins i32imm:$reg, i32imm:$offs), []>, Sched<[]>;
+  def SEH_PrologEnd : Pseudo<(outs), (ins), []>, Sched<[]>;
+}
+
+// Pseudo instructions for Windows funclet-based C++ exception handling.
+// WinEHPrepare splits catch/cleanup handlers into separate funclets, whose
+// returns survive to ISel as ISD::CATCHRET / ISD::CLEANUPRET. Both lower to a
+// plain `ret` (jalr x0, ra) in RISCVAsmPrinter: the funclet returns to the
+// personality routine, which resumes execution. For a catchret the handler
+// must also return the continuation address in a0; RISCVInstrInfo's
+// expandPostRAPseudo materializes that (auipc/addi to the target block) before
+// the funclet epilogue, mirroring AArch64's CATCHRET/CLEANUPRET handling.
+def eh_brtarget : Operand<OtherVT>;
+let isTerminator = 1, hasSideEffects = 1, isBarrier = 1, hasCtrlDep = 1,
+    isCodeGenOnly = 1, isReturn = 1, isEHScopeReturn = 1, isPseudo = 1 in {
+  def CLEANUPRET : Pseudo<(outs), (ins), [(cleanupret bb)]>, Sched<[]>;
+  def CATCHRET : Pseudo<(outs), (ins eh_brtarget:$dst, eh_brtarget:$src),
+                        [(catchret bb:$dst, bb:$src)]>, Sched<[]>;
+}
+
+// Materializes the value of an absolute (`.set`-defined) MCSymbol into a GPR
+// via lui/addi with the non-PC-relative %hi/%lo modifiers. Backs
+// llvm.localrecover, used by the SEH __except filter/handler functions that
+// WinEHPrepare outlines to reach locals in the parent frame. Mirrors
+// AArch64's MOVMCSym.
+def riscv_local_recover : SDNode<"ISD::LOCAL_RECOVER",
+                                 SDTypeProfile<1, 1, [SDTCisSameAs<0, 1>,
+                                                      SDTCisInt<1>]>>;
+let isPseudo = 1, Size = 8, hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
+def PseudoMovMCSym : Pseudo<(outs GPR:$dst), (ins i64imm:$sym), []>, Sched<[]>;
+def : Pat<(i64 (riscv_local_recover mcsym:$sym)), (PseudoMovMCSym mcsym:$sym)>;
+
+//===----------------------------------------------------------------------===//
 // Standard extensions
 //===----------------------------------------------------------------------===//
 

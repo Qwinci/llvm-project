@@ -24,11 +24,13 @@
 #include "TargetInfo/RISCVTargetInfo.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/BinaryFormat/COFF.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/CodeGen/MachineModuleInfoImpls.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
@@ -103,10 +105,17 @@ public:
   std::map<HwasanMemaccessTuple, MCSymbol *> HwasanMemaccessSymbols;
   void LowerHWASAN_CHECK_MEMACCESS(const MachineInstr &MI);
   void LowerKCFI_CHECK(const MachineInstr &MI);
+  void LowerSEHInstruction(const MachineInstr &MI);
+  void LowerMovMCSym(const MachineInstr &MI);
   void EmitHwasanMemaccessSymbols(Module &M);
 
   // Wrapper needed for tblgenned pseudo lowering.
   bool lowerOperand(const MachineOperand &MO, MCOperand &MCOp) const;
+
+  // Resolve the MCSymbol a global-address operand refers to, redirecting
+  // COFF/Windows indirect references (MO_COFFSTUB, MO_DLLIMPORT) to their
+  // .refptr.<sym>/__imp_<sym> stub symbol.
+  MCSymbol *getSymbolForGlobalOperand(const MachineOperand &MO) const;
 
   void emitStartOfAsmFile(Module &M) override;
   void emitEndOfAsmFile(Module &M) override;
@@ -129,7 +138,7 @@ private:
 
   void lowerToMCInst(const MachineInstr *MI, MCInst &OutMI);
 };
-}
+} // namespace
 
 void RISCVAsmPrinter::LowerSTACKMAP(MCStreamer &OutStreamer, StackMaps &SM,
                                     const MachineInstr &MI) {
@@ -323,6 +332,26 @@ void RISCVAsmPrinter::emitInstruction(const MachineInstr *MI) {
   case RISCV::KCFI_CHECK:
     LowerKCFI_CHECK(*MI);
     return;
+  case RISCV::SEH_StackAlloc:
+  case RISCV::SEH_SaveReg:
+  case RISCV::SEH_SaveFReg:
+  case RISCV::SEH_SetFrame:
+  case RISCV::SEH_PrologEnd:
+    LowerSEHInstruction(*MI);
+    return;
+  case RISCV::PseudoMovMCSym:
+    LowerMovMCSym(*MI);
+    return;
+  case RISCV::CLEANUPRET:
+  case RISCV::CATCHRET:
+    // Windows C++ EH funclet return: the funclet returns to the personality
+    // routine via a plain `ret`. For CATCHRET the continuation address was
+    // already materialized into a0 by RISCVInstrInfo::expandPostRAPseudo.
+    EmitToStreamer(*OutStreamer, MCInstBuilder(RISCV::JALR)
+                                     .addReg(RISCV::X0)
+                                     .addReg(RISCV::X1)
+                                     .addImm(0));
+    return;
   case TargetOpcode::STACKMAP:
     return LowerSTACKMAP(*OutStreamer, SM, *MI);
   case TargetOpcode::PATCHPOINT:
@@ -485,6 +514,21 @@ bool RISCVAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   bool EmittedOptionArch = emitDirectiveOptionArch();
 
   SetupMachineFunction(MF);
+
+  // Mark the symbol as a function in the COFF symbol table. Consumers use this
+  // to tell code from data: without it a function is indistinguishable from a
+  // global variable, and anything resolving a function by name off the symbol
+  // table fails to find it.
+  if (TM.getTargetTriple().isOSBinFormatCOFF()) {
+    OutStreamer->beginCOFFSymbolDef(CurrentFnSym);
+    OutStreamer->emitCOFFSymbolStorageClass(
+        MF.getFunction().hasLocalLinkage() ? COFF::IMAGE_SYM_CLASS_STATIC
+                                           : COFF::IMAGE_SYM_CLASS_EXTERNAL);
+    OutStreamer->emitCOFFSymbolType(COFF::IMAGE_SYM_DTYPE_FUNCTION
+                                    << COFF::SCT_COMPLEX_TYPE_SHIFT);
+    OutStreamer->endCOFFSymbolDef();
+  }
+
   emitFunctionBody();
 
   // Emit the XRay table
@@ -729,6 +773,64 @@ void RISCVAsmPrinter::LowerKCFI_CHECK(const MachineInstr &MI) {
   OutStreamer->emitLabel(Pass);
 }
 
+// Lower the SEH pseudos from RISCVInstrInfo.td into unwind codes via
+// RISCVTargetStreamer, which translates physical registers into the compact
+// xdata register indices. `.seh_stackalloc`/`.seh_endprologue` carry no
+// register and go straight to the target-agnostic MCStreamer directives.
+void RISCVAsmPrinter::LowerSEHInstruction(const MachineInstr &MI) {
+  assert(MF->getTarget().getTargetTriple().isOSWindows() &&
+         "SEH pseudo instructions should only exist on Windows targets");
+  auto &RTS =
+      static_cast<RISCVTargetStreamer &>(*OutStreamer->getTargetStreamer());
+  switch (MI.getOpcode()) {
+  default:
+    llvm_unreachable("Unexpected opcode in LowerSEHInstruction");
+  case RISCV::SEH_StackAlloc:
+    OutStreamer->emitWinCFIAllocStack(MI.getOperand(0).getImm(), SMLoc());
+    return;
+  case RISCV::SEH_SaveReg:
+    RTS.emitRISCVWinCFISaveReg(MI.getOperand(0).getImm(),
+                               MI.getOperand(1).getImm(), SMLoc());
+    return;
+  case RISCV::SEH_SaveFReg:
+    RTS.emitRISCVWinCFISaveFReg(MI.getOperand(0).getImm(),
+                                MI.getOperand(1).getImm(), SMLoc());
+    return;
+  case RISCV::SEH_SetFrame:
+    RTS.emitRISCVWinCFISetFrame(MI.getOperand(0).getImm(),
+                                MI.getOperand(1).getImm(), SMLoc());
+    return;
+  case RISCV::SEH_PrologEnd:
+    OutStreamer->emitWinCFIEndProlog(SMLoc());
+    return;
+  }
+}
+
+void RISCVAsmPrinter::LowerMovMCSym(const MachineInstr &MI) {
+  Register DestReg = MI.getOperand(0).getReg();
+  MachineOperand HiMO(MI.getOperand(1));
+  MachineOperand LoMO(MI.getOperand(1));
+  HiMO.setTargetFlags(RISCVII::MO_HI);
+  LoMO.setTargetFlags(RISCVII::MO_LO);
+
+  MCOperand HiMCSym, LoMCSym;
+  lowerOperand(HiMO, HiMCSym);
+  lowerOperand(LoMO, LoMCSym);
+
+  MCInst Lui;
+  Lui.setOpcode(RISCV::LUI);
+  Lui.addOperand(MCOperand::createReg(DestReg));
+  Lui.addOperand(HiMCSym);
+  EmitToStreamer(*OutStreamer, Lui);
+
+  MCInst Addi;
+  Addi.setOpcode(RISCV::ADDI);
+  Addi.addOperand(MCOperand::createReg(DestReg));
+  Addi.addOperand(MCOperand::createReg(DestReg));
+  Addi.addOperand(LoMCSym);
+  EmitToStreamer(*OutStreamer, Addi);
+}
+
 void RISCVAsmPrinter::EmitHwasanMemaccessSymbols(Module &M) {
   if (HwasanMemaccessSymbols.empty())
     return;
@@ -968,7 +1070,9 @@ static MCOperand lowerSymbolOperand(const MachineOperand &MO, MCSymbol *Sym,
   MCContext &Ctx = AP.OutContext;
   RISCV::Specifier Kind;
 
-  switch (MO.getTargetFlags()) {
+  // The low bits hold the "direct" specifier; the MO_COFFSTUB/MO_DLLIMPORT
+  // bitmask bits (handled when the symbol is chosen) are masked off here.
+  switch (MO.getTargetFlags() & RISCVII::MO_DIRECT_FLAG_MASK) {
   default:
     llvm_unreachable("Unknown target flag on GV operand");
   case RISCVII::MO_None:
@@ -1019,6 +1123,12 @@ static MCOperand lowerSymbolOperand(const MachineOperand &MO, MCSymbol *Sym,
   case RISCVII::MO_TLSDESC_CALL:
     Kind = ELF::R_RISCV_TLSDESC_CALL;
     break;
+  case RISCVII::MO_TLS_SECREL_HI:
+    Kind = RISCV::S_TLS_SECREL_HI;
+    break;
+  case RISCVII::MO_TLS_SECREL_LO:
+    Kind = RISCV::S_TLS_SECREL_LO;
+    break;
   }
 
   const MCExpr *ME = MCSymbolRefExpr::create(Sym, Ctx);
@@ -1030,6 +1140,38 @@ static MCOperand lowerSymbolOperand(const MachineOperand &MO, MCSymbol *Sym,
   if (Kind != RISCV::S_None)
     ME = MCSpecifierExpr::create(ME, Kind, Ctx);
   return MCOperand::createExpr(ME);
+}
+
+MCSymbol *
+RISCVAsmPrinter::getSymbolForGlobalOperand(const MachineOperand &MO) const {
+  const GlobalValue *GV = MO.getGlobal();
+  unsigned Flags = MO.getTargetFlags();
+
+  // A dllimport reference loads the address from __imp_<sym> in the import
+  // address table.
+  if (Flags & RISCVII::MO_DLLIMPORT) {
+    SmallString<128> Name("__imp_");
+    getNameWithPrefix(Name, GV);
+    return OutContext.getOrCreateSymbol(Name);
+  }
+
+  // An auto-import (COFF stub) reference loads the address from a local
+  // .refptr.<sym> pointer, which the linker (or the mingw runtime pseudo
+  // relocation mechanism) fills in. The pointer itself is emitted as a COMDAT
+  // by AsmPrinter::emitEndOfAsmFile from the stub list registered here.
+  if (Flags & RISCVII::MO_COFFSTUB) {
+    SmallString<128> Name(".refptr.");
+    getNameWithPrefix(Name, GV);
+    MCSymbol *Sym = OutContext.getOrCreateSymbol(Name);
+    MachineModuleInfoCOFF &MMICOFF =
+        MMI->getObjFileInfo<MachineModuleInfoCOFF>();
+    MachineModuleInfoImpl::StubValueTy &StubSym = MMICOFF.getGVStubEntry(Sym);
+    if (!StubSym.getPointer())
+      StubSym = MachineModuleInfoImpl::StubValueTy(getSymbol(GV), true);
+    return Sym;
+  }
+
+  return getSymbolPreferLocal(*GV);
 }
 
 bool RISCVAsmPrinter::lowerOperand(const MachineOperand &MO,
@@ -1053,7 +1195,7 @@ bool RISCVAsmPrinter::lowerOperand(const MachineOperand &MO,
     MCOp = lowerSymbolOperand(MO, MO.getMBB()->getSymbol(), *this);
     break;
   case MachineOperand::MO_GlobalAddress:
-    MCOp = lowerSymbolOperand(MO, getSymbolPreferLocal(*MO.getGlobal()), *this);
+    MCOp = lowerSymbolOperand(MO, getSymbolForGlobalOperand(MO), *this);
     break;
   case MachineOperand::MO_BlockAddress:
     MCOp = lowerSymbolOperand(MO, GetBlockAddressSymbol(MO.getBlockAddress()),

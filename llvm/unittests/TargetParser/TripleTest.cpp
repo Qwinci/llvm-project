@@ -2855,6 +2855,12 @@ TEST(TripleTest, FileFormat) {
   EXPECT_EQ(Triple::SPIRV, Triple("spirv-apple-macosx").getObjectFormat());
   EXPECT_EQ(Triple::SPIRV, Triple("spirv32-apple-macosx").getObjectFormat());
   EXPECT_EQ(Triple::SPIRV, Triple("spirv64-apple-macosx").getObjectFormat());
+
+  EXPECT_EQ(Triple::ELF, Triple("riscv64-unknown-linux").getObjectFormat());
+  EXPECT_EQ(Triple::COFF, Triple("riscv64-pc-windows-msvc").getObjectFormat());
+  EXPECT_EQ(Triple::COFF, Triple("riscv64-pc-uefi").getObjectFormat());
+  EXPECT_EQ(Triple::ELF, Triple("riscv32-pc-windows-msvc").getObjectFormat());
+  EXPECT_EQ(Triple::ELF, Triple("riscv64be-pc-windows-msvc").getObjectFormat());
   EXPECT_EQ(Triple::DXContainer, Triple("dxil-apple-macosx").getObjectFormat());
 }
 

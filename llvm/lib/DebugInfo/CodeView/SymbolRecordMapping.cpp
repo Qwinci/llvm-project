@@ -23,7 +23,7 @@ struct MapGap {
     return Error::success();
   }
 };
-}
+} // namespace
 
 static Error mapLocalVariableAddrRange(CodeViewRecordIO &IO,
                                        LocalVariableAddrRange &Range) {
@@ -519,18 +519,38 @@ RegisterId codeview::decodeFramePtrReg(EncodedFramePtrReg EncodedReg,
   case CPUType::PentiumPro:
   case CPUType::Pentium3:
     switch (EncodedReg) {
-    case EncodedFramePtrReg::None:     return RegisterId::NONE;
-    case EncodedFramePtrReg::StackPtr: return RegisterId::VFRAME;
-    case EncodedFramePtrReg::FramePtr: return RegisterId::EBP;
-    case EncodedFramePtrReg::BasePtr:  return RegisterId::EBX;
+    case EncodedFramePtrReg::None:
+      return RegisterId::NONE;
+    case EncodedFramePtrReg::StackPtr:
+      return RegisterId::VFRAME;
+    case EncodedFramePtrReg::FramePtr:
+      return RegisterId::EBP;
+    case EncodedFramePtrReg::BasePtr:
+      return RegisterId::EBX;
     }
     llvm_unreachable("bad encoding");
   case CPUType::X64:
     switch (EncodedReg) {
-    case EncodedFramePtrReg::None:     return RegisterId::NONE;
-    case EncodedFramePtrReg::StackPtr: return RegisterId::RSP;
-    case EncodedFramePtrReg::FramePtr: return RegisterId::RBP;
-    case EncodedFramePtrReg::BasePtr:  return RegisterId::R13;
+    case EncodedFramePtrReg::None:
+      return RegisterId::NONE;
+    case EncodedFramePtrReg::StackPtr:
+      return RegisterId::RSP;
+    case EncodedFramePtrReg::FramePtr:
+      return RegisterId::RBP;
+    case EncodedFramePtrReg::BasePtr:
+      return RegisterId::R13;
+    }
+    llvm_unreachable("bad encoding");
+  case CPUType::RISCV64:
+    switch (EncodedReg) {
+    case EncodedFramePtrReg::None:
+      return RegisterId::NONE;
+    case EncodedFramePtrReg::StackPtr:
+      return RegisterId::RISCV64_X2;
+    case EncodedFramePtrReg::FramePtr:
+      return RegisterId::RISCV64_X8;
+    case EncodedFramePtrReg::BasePtr:
+      return RegisterId::RISCV64_X9;
     }
     llvm_unreachable("bad encoding");
   }
@@ -556,6 +576,18 @@ EncodedFramePtrReg codeview::encodeFramePtrReg(RegisterId Reg, CPUType CPU) {
     case RegisterId::EBP:
       return EncodedFramePtrReg::FramePtr;
     case RegisterId::EBX:
+      return EncodedFramePtrReg::BasePtr;
+    default:
+      break;
+    }
+    break;
+  case CPUType::RISCV64:
+    switch (Reg) {
+    case RegisterId::RISCV64_X2:
+      return EncodedFramePtrReg::StackPtr;
+    case RegisterId::RISCV64_X8:
+      return EncodedFramePtrReg::FramePtr;
+    case RegisterId::RISCV64_X9:
       return EncodedFramePtrReg::BasePtr;
     default:
       break;

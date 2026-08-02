@@ -65,6 +65,20 @@ public:
   void setFlagsFromFeatures(const MCSubtargetInfo &STI);
   bool hasRVC() const { return HasRVC; }
   bool hasTSO() const { return HasTSO; }
+
+  // Windows SEH directives that need RISC-V's own register numbering.
+  // `.seh_stackalloc`, `.seh_endprologue`, `.seh_startepilogue` and
+  // `.seh_endepilogue` carry no register operand and are parsed generically by
+  // COFFAsmParser.cpp.
+  virtual void emitRISCVWinCFISaveReg(unsigned Reg, int Offset, SMLoc Loc) {}
+  virtual void emitRISCVWinCFISaveFReg(unsigned Reg, int Offset, SMLoc Loc) {}
+  virtual void emitRISCVWinCFISetFrame(unsigned Reg, int Offset, SMLoc Loc) {}
+  // Operand-less SEH opcodes for hand-written OS runtime stubs (never emitted
+  // by codegen): `.seh_trap_frame`, `.seh_context`, `.seh_clear_unwound_to_call`.
+  // See llvm/docs/RISCVWinCFI.md.
+  virtual void emitRISCVWinCFITrapFrame(SMLoc Loc) {}
+  virtual void emitRISCVWinCFIContext(SMLoc Loc) {}
+  virtual void emitRISCVWinCFIClearUnwoundToCall(SMLoc Loc) {}
 };
 
 // This part is for ascii assembly output
@@ -92,7 +106,30 @@ public:
   void emitDirectiveOptionRVC() override;
   void emitDirectiveOptionNoRVC() override;
   void emitDirectiveVariantCC(MCSymbol &Symbol) override;
+
+  void emitRISCVWinCFISaveReg(unsigned Reg, int Offset, SMLoc Loc) override;
+  void emitRISCVWinCFISaveFReg(unsigned Reg, int Offset, SMLoc Loc) override;
+  void emitRISCVWinCFISetFrame(unsigned Reg, int Offset, SMLoc Loc) override;
+  void emitRISCVWinCFITrapFrame(SMLoc Loc) override;
+  void emitRISCVWinCFIContext(SMLoc Loc) override;
+  void emitRISCVWinCFIClearUnwoundToCall(SMLoc Loc) override;
 };
 
+// This part is for Windows COFF output.
+class RISCVTargetWinCOFFStreamer : public llvm::RISCVTargetStreamer {
+public:
+  RISCVTargetWinCOFFStreamer(llvm::MCStreamer &S) : RISCVTargetStreamer(S) {}
+
+  void emitRISCVWinCFISaveReg(unsigned Reg, int Offset, SMLoc Loc) override;
+  void emitRISCVWinCFISaveFReg(unsigned Reg, int Offset, SMLoc Loc) override;
+  void emitRISCVWinCFISetFrame(unsigned Reg, int Offset, SMLoc Loc) override;
+  void emitRISCVWinCFITrapFrame(SMLoc Loc) override;
+  void emitRISCVWinCFIContext(SMLoc Loc) override;
+  void emitRISCVWinCFIClearUnwoundToCall(SMLoc Loc) override;
+
+private:
+  void emitRISCVWinUnwindCode(unsigned UnwindCode, unsigned Reg, int Offset,
+                              SMLoc Loc);
+};
 }
 #endif

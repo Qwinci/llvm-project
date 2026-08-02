@@ -3191,7 +3191,9 @@ def RISCVSystemLibrary
            exp10f, exp10, exp10l_f128,
            __riscv_flush_icache,
            LibcallImpls<(add Int128RTLibcalls), isRISCV64>,
-           DefaultStackProtector)>;
+           DefaultStackProtector,
+           SecurityCheckCookieIfWinMSVC,
+           LibcallImpls<(add __chkstk), isOSWindows>)>;
 
 //===----------------------------------------------------------------------===//
 // SPARC Runtime Libcalls

@@ -88,6 +88,9 @@ MCFixupKindInfo RISCVAsmBackend::getFixupKindInfo(MCFixupKind Kind) const {
       {"fixup_riscv_call", 0, 64, 0},
       {"fixup_riscv_call_plt", 0, 64, 0},
 
+      {"fixup_riscv_tls_secrel_hi20", 12, 20, 0},
+      {"fixup_riscv_tls_secrel_lo12_i", 20, 12, 0},
+
       {"fixup_riscv_qc_e_branch", 0, 48, 0},
       {"fixup_riscv_qc_e_32", 16, 32, 0},
       {"fixup_riscv_qc_abs20_u", 0, 32, 0},
@@ -510,6 +513,10 @@ static uint64_t adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
   case FK_Data_4:
   case FK_Data_8:
   case FK_Data_leb128:
+  case FK_SecRel_1:
+  case FK_SecRel_2:
+  case FK_SecRel_4:
+  case FK_SecRel_8:
     return Value;
   case RISCV::fixup_riscv_lo12_i:
   case RISCV::fixup_riscv_pcrel_lo12_i:
@@ -726,7 +733,7 @@ static const MCFixup *getPCRelHiFixup(const MCSpecifierExpr &Expr,
   return nullptr;
 }
 
-std::optional<bool> RISCVAsmBackend::evaluateFixup(const MCFragment &,
+std::optional<bool> RISCVAsmBackend::evaluateFixup(const MCFragment &F,
                                                    MCFixup &Fixup,
                                                    MCValue &Target,
                                                    uint64_t &Value) {
@@ -758,6 +765,23 @@ std::optional<bool> RISCVAsmBackend::evaluateFixup(const MCFragment &,
 
   if (!AUIPCTarget.getAddSym())
     return false;
+
+  // COFF relocations have no explicit addend field, so the ELF path below --
+  // which resolves through the local %pcrel_hi label -- does not work here:
+  // that label's offset from its section start easily exceeds the 12-bit
+  // instruction field used to round-trip it. Resolve straight to the %pcrel_hi
+  // target symbol instead, folding the (always small) distance between the two
+  // instructions into a constant addend. lld's applyRelRISCV64 performs the
+  // matching computation at link time.
+  if (!STI.getTargetTriple().isOSBinFormatELF()) {
+    int64_t Delta =
+        (Asm->getFragmentOffset(F) + Fixup.getOffset()) -
+        (Asm->getFragmentOffset(*AUIPCDF) + AUIPCFixup->getOffset());
+    Target = MCValue::get(AUIPCTarget.getAddSym(), /*SymB=*/nullptr,
+                          AUIPCTarget.getConstant() + Delta);
+    Value = Delta;
+    return false;
+  }
 
   auto &SA = static_cast<const MCSymbolELF &>(*AUIPCTarget.getAddSym());
   if (SA.isUndefined())
@@ -842,7 +866,14 @@ bool RISCVAsmBackend::addReloc(const MCFragment &F, const MCFixup &Fixup,
                                const MCValue &Target, uint64_t &FixedValue,
                                bool IsResolved) {
   uint64_t FixedValueA, FixedValueB;
-  if (Target.getSubSym()) {
+  // The ELF psABI encodes an unresolved SymA-SymB difference as an ADD/SUB
+  // relocation pair so linker relaxation can adjust each term independently.
+  // COFF has no such pairing, and relaxation is never enabled here (see the
+  // NeedsRelax comment below), so fall through instead: the unresolved
+  // Fixup/Target reaches recordRelocation(), where getRelocType()'s
+  // IsCrossSection handling turns a same-width symbol difference into a single
+  // PC-relative relocation, as AArch64 does.
+  if (Target.getSubSym() && STI.getTargetTriple().isOSBinFormatELF()) {
     assert(Target.getSpecifier() == 0 &&
            "relocatable SymA-SymB cannot have relocation specifier");
     unsigned TA = 0, TB = 0;
@@ -882,7 +913,16 @@ bool RISCVAsmBackend::addReloc(const MCFragment &F, const MCFixup &Fixup,
 
   // If linker relaxation is enabled and supported by the current fixup, then we
   // always want to generate a relocation.
-  bool NeedsRelax = Fixup.isLinkerRelaxable() &&
+  //
+  // COFF has no R_RISCV_RELAX counterpart and does not support linker
+  // relaxation. The +relax feature is still on by default regardless of object
+  // format, so isLinkerRelaxable() can be true here for riscv64-windows;
+  // emitting the ELF-only relocation below would then reach
+  // WinCOFFObjectWriter::recordRelocation with the symbolless
+  // MCValue::get(nullptr), which it does not accept. IsResolved is still
+  // forced false below, so the fixup's own relocation is recorded as usual.
+  bool NeedsRelax = STI.getTargetTriple().isOSBinFormatELF() &&
+                    Fixup.isLinkerRelaxable() &&
                     relaxableFixupNeedsRelocation(Fixup.getKind());
   if (NeedsRelax)
     IsResolved = false;
@@ -930,6 +970,18 @@ static bool isDataFixup(unsigned Kind) {
 void RISCVAsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
                                  const MCValue &Target, uint8_t *Data,
                                  uint64_t Value, bool IsResolved) {
+  // COFF relocations have no addend field. For a %pcrel_hi that will get a
+  // relocation, store the raw byte addend (the offset from the referenced
+  // symbol) in the auipc's 20-bit immediate instead of the pre-rounded high
+  // part. lld folds it back into the target before computing the pc-relative
+  // high part -- the +0x800 carry needs the full value, so it can only be
+  // reconstructed if the whole addend survives. This mirrors how AArch64
+  // carries the addend in the ADRP immediate. The paired %pcrel_lo already
+  // round-trips the low bits, so it needs no change. A fully-resolved
+  // %pcrel_hi emits no relocation and keeps the normal high-part encoding.
+  bool CoffRawPCRelHi = STI.getTargetTriple().isOSBinFormatCOFF() &&
+                        Fixup.getKind() == RISCV::fixup_riscv_pcrel_hi20 &&
+                        !IsResolved;
   IsResolved = addReloc(F, Fixup, Target, Value, IsResolved);
   MCFixupKind Kind = Fixup.getKind();
   if (mc::isRelocation(Kind))
@@ -938,8 +990,16 @@ void RISCVAsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
   MCFixupKindInfo Info = getFixupKindInfo(Kind);
   if (!Value)
     return; // Doesn't change encoding.
-  // Apply any target-specific value adjustments.
-  Value = adjustFixupValue(Fixup, Value, Ctx);
+  if (CoffRawPCRelHi) {
+    if (!isInt<20>((int64_t)Value))
+      Ctx.reportError(Fixup.getLoc(),
+                      "%pcrel_hi symbol offset too large for COFF (no "
+                      "relocation addend field)");
+    Value &= 0xfffff;
+  } else {
+    // Apply any target-specific value adjustments.
+    Value = adjustFixupValue(Fixup, Value, Ctx);
+  }
 
   // Shift the value into position.
   Value <<= Info.TargetOffset;
@@ -978,6 +1038,18 @@ public:
   }
 };
 
+class COFFRISCVAsmBackend : public RISCVAsmBackend {
+public:
+  COFFRISCVAsmBackend(const MCSubtargetInfo &STI, uint8_t OSABI, bool Is64Bit,
+                      bool IsLittleEndian, const MCTargetOptions &Options)
+      : RISCVAsmBackend(STI, OSABI, Is64Bit, IsLittleEndian, Options) {}
+
+  std::unique_ptr<MCObjectTargetWriter>
+  createObjectTargetWriter() const override {
+    return createRISCVWinCOFFObjectWriter();
+  }
+};
+
 MCAsmBackend *llvm::createRISCVAsmBackend(const Target &T,
                                           const MCSubtargetInfo &STI,
                                           const MCRegisterInfo &MRI,
@@ -987,6 +1059,9 @@ MCAsmBackend *llvm::createRISCVAsmBackend(const Target &T,
   if (TT.isOSBinFormatMachO())
     return new DarwinRISCVAsmBackend(STI, OSABI, TT.isArch64Bit(),
                                      TT.isLittleEndian(), Options);
+  if (TT.isOSBinFormatCOFF())
+    return new COFFRISCVAsmBackend(STI, OSABI, TT.isArch64Bit(),
+                                   TT.isLittleEndian(), Options);
   return new RISCVAsmBackend(STI, OSABI, TT.isArch64Bit(), TT.isLittleEndian(),
                              Options);
 }

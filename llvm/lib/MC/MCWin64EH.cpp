@@ -444,6 +444,225 @@ void llvm::Win64EH::UnwindEmitter::EmitUnwindInfo(MCStreamer &Streamer,
   ::EmitUnwindInfo(Streamer, info);
 }
 
+// RISCV64 reuses the x86_64 UNWIND_INFO container and 2-byte UnwindCode slot
+// scheme unchanged (see EmitRuntimeFunction/EmitAbsDifference above); only the
+// opcodes that depend on RISC-V's register set are new. The format is
+// documented in llvm/docs/RISCVWinCFI.md.
+//
+// The on-disk opcode nibble is 4 bits wide, so it cannot hold the raw
+// Win64EH::UnwindOpcodes ordinal of UOP_RISCVSaveFReg, which is appended after
+// the x86_64/ARM64/ARM blocks and so exceeds 15. Map to a small on-disk value
+// explicitly instead; the reused opcodes already fit.
+static uint8_t riscv64OnDiskOp(unsigned Operation) {
+  switch (static_cast<Win64EH::UnwindOpcodes>(Operation)) {
+  default:
+    llvm_unreachable("Unsupported RISCV64 unwind code");
+  case Win64EH::UOP_AllocLarge:
+    return 1;
+  case Win64EH::UOP_AllocSmall:
+    return 2;
+  case Win64EH::UOP_SetFPReg:
+    return 3;
+  case Win64EH::UOP_SaveNonVol:
+    return 4;
+  case Win64EH::UOP_RISCVSaveFReg:
+    return 5;
+  // Operand-less opcodes for hand-written OS runtime stubs; reuse the ARM64
+  // Win64EH enum values but pack into RISCV64's own dense nibble range. See
+  // llvm/docs/RISCVWinCFI.md.
+  case Win64EH::UOP_TrapFrame:
+    return 6;
+  case Win64EH::UOP_Context:
+    return 7;
+  case Win64EH::UOP_ClearUnwoundToCall:
+    return 8;
+  }
+}
+
+static uint8_t
+RISCV64CountOfUnwindCodes(const std::vector<WinEH::Instruction> &Insns) {
+  uint8_t Count = 0;
+  for (const auto &I : Insns) {
+    switch (static_cast<Win64EH::UnwindOpcodes>(I.Operation)) {
+    default:
+      llvm_unreachable("Unsupported RISCV64 unwind code");
+    case Win64EH::UOP_AllocSmall:
+    case Win64EH::UOP_SetFPReg:
+      Count += 1;
+      break;
+    case Win64EH::UOP_AllocLarge:
+      Count += (I.Offset > 512 * 1024 - 8) ? 3 : 2;
+      break;
+    case Win64EH::UOP_SaveNonVol:
+    case Win64EH::UOP_RISCVSaveFReg:
+      Count += 2;
+      break;
+    case Win64EH::UOP_TrapFrame:
+    case Win64EH::UOP_Context:
+    case Win64EH::UOP_ClearUnwoundToCall:
+      Count += 1;
+      break;
+    }
+  }
+  return Count;
+}
+
+static void RISCV64EmitUnwindCode(MCStreamer &streamer, const MCSymbol *begin,
+                                  WinEH::Instruction &inst) {
+  uint8_t b2;
+  uint16_t w;
+  b2 = riscv64OnDiskOp(inst.Operation);
+  switch (static_cast<Win64EH::UnwindOpcodes>(inst.Operation)) {
+  default:
+    llvm_unreachable("Unsupported RISCV64 unwind code");
+  case Win64EH::UOP_AllocLarge:
+    EmitAbsDifference(streamer, inst.Label, begin);
+    if (inst.Offset > 512 * 1024 - 8) {
+      b2 |= 0x10;
+      streamer.emitInt8(b2);
+      w = inst.Offset & 0xFFF8;
+      streamer.emitInt16(w);
+      w = inst.Offset >> 16;
+    } else {
+      streamer.emitInt8(b2);
+      w = inst.Offset >> 3;
+    }
+    streamer.emitInt16(w);
+    break;
+  case Win64EH::UOP_AllocSmall:
+    b2 |= (((inst.Offset - 8) >> 3) & 0x0F) << 4;
+    EmitAbsDifference(streamer, inst.Label, begin);
+    streamer.emitInt8(b2);
+    break;
+  case Win64EH::UOP_SetFPReg:
+    EmitAbsDifference(streamer, inst.Label, begin);
+    streamer.emitInt8(b2);
+    break;
+  case Win64EH::UOP_SaveNonVol:
+  case Win64EH::UOP_RISCVSaveFReg:
+    b2 |= (inst.Register & 0x0F) << 4;
+    EmitAbsDifference(streamer, inst.Label, begin);
+    streamer.emitInt8(b2);
+    w = inst.Offset >> 3;
+    streamer.emitInt16(w);
+    break;
+  case Win64EH::UOP_TrapFrame:
+  case Win64EH::UOP_Context:
+  case Win64EH::UOP_ClearUnwoundToCall:
+    // Single 2-byte slot: CodeOffset then the opcode nibble (OpInfo unused, 0).
+    // No register/offset operand -- these mark a point in a hand-written OS
+    // stub where the frame is restored from an OS-synthesized structure.
+    EmitAbsDifference(streamer, inst.Label, begin);
+    streamer.emitInt8(b2);
+    break;
+  }
+}
+
+static void RISCV64EmitUnwindInfo(MCStreamer &streamer,
+                                  WinEH::FrameInfo *info) {
+  // If this UNWIND_INFO already has a symbol, it's already been emitted.
+  if (info->Symbol)
+    return;
+
+  MCContext &context = streamer.getContext();
+  MCSymbol *Label = context.createTempSymbol();
+
+  streamer.emitValueToAlignment(Align(4));
+  streamer.emitLabel(Label);
+  info->Symbol = Label;
+
+  uint8_t numCodes = RISCV64CountOfUnwindCodes(info->Instructions);
+
+  // Upper 3 bits are the version number.
+  uint8_t flags = info->Version;
+  if (info->ChainedParent)
+    flags |= Win64EH::UNW_ChainInfo << 3;
+  else {
+    if (info->HandlesUnwind)
+      flags |= Win64EH::UNW_TerminateHandler << 3;
+    if (info->HandlesExceptions)
+      flags |= Win64EH::UNW_ExceptionHandler << 3;
+  }
+  streamer.emitInt8(flags);
+
+  if (info->PrologEnd)
+    EmitAbsDifference(streamer, info->PrologEnd, info->Begin);
+  else
+    streamer.emitInt8(0);
+
+  streamer.emitInt8(numCodes);
+
+  // RISCV64's frame register is always s0, so unlike x86_64/ARM64 there is no
+  // register to pack alongside the offset: the whole byte is offset/16, giving
+  // an 8-bit (0-4080) range instead of x86_64's 4-bit (0-240) one. Validated
+  // in RISCVWinCOFFStreamer.cpp's emitRISCVWinCFISetFrame.
+  uint8_t frame = 0;
+  if (info->LastFrameInst >= 0) {
+    WinEH::Instruction &frameInst = info->Instructions[info->LastFrameInst];
+    assert(frameInst.Operation == Win64EH::UOP_SetFPReg);
+    frame = (frameInst.Offset >> 4) & 0xFF;
+  }
+  streamer.emitInt8(frame);
+
+  // Emit unwind instructions (in reverse order).
+  uint8_t numInst = info->Instructions.size();
+  for (uint8_t c = 0; c < numInst; ++c) {
+    WinEH::Instruction inst = info->Instructions.back();
+    info->Instructions.pop_back();
+    RISCV64EmitUnwindCode(streamer, info->Begin, inst);
+  }
+
+  // For alignment purposes, the instruction array will always have an even
+  // number of entries, with the final entry potentially unused (in which case
+  // the array will be one longer than indicated by the count of unwind codes
+  // field).
+  if (numCodes & 1) {
+    streamer.emitInt16(0);
+  }
+
+  if (flags & (Win64EH::UNW_ChainInfo << 3))
+    EmitRuntimeFunction(streamer, info->ChainedParent);
+  else if (flags &
+           ((Win64EH::UNW_TerminateHandler | Win64EH::UNW_ExceptionHandler)
+            << 3))
+    streamer.emitValue(
+        MCSymbolRefExpr::create(info->ExceptionHandler,
+                                MCSymbolRefExpr::VK_COFF_IMGREL32, context),
+        4);
+  else if (numCodes == 0) {
+    // The minimum size of an UNWIND_INFO struct is 8 bytes. If we're not
+    // a chained unwind info, if there is no handler, and if there are fewer
+    // than 2 slots used in the unwind code array, we have to pad to 8 bytes.
+    streamer.emitInt32(0);
+  }
+}
+
+void llvm::Win64EH::RISCV64UnwindEmitter::Emit(MCStreamer &Streamer) const {
+  // Emit the unwind info structs first.
+  for (const auto &CFI : Streamer.getWinFrameInfos()) {
+    MCSection *XData = Streamer.getAssociatedXDataSection(CFI->TextSection);
+    Streamer.switchSection(XData);
+    ::RISCV64EmitUnwindInfo(Streamer, CFI.get());
+  }
+
+  // Now emit RUNTIME_FUNCTION entries.
+  for (const auto &CFI : Streamer.getWinFrameInfos()) {
+    MCSection *PData = Streamer.getAssociatedPDataSection(CFI->TextSection);
+    Streamer.switchSection(PData);
+    EmitRuntimeFunction(Streamer, CFI.get());
+  }
+}
+
+void llvm::Win64EH::RISCV64UnwindEmitter::EmitUnwindInfo(
+    MCStreamer &Streamer, WinEH::FrameInfo *info, bool HandlerData) const {
+  // Switch sections (the static function above is meant to be called from
+  // here and from Emit().
+  MCSection *XData = Streamer.getAssociatedXDataSection(info->TextSection);
+  Streamer.switchSection(XData);
+
+  ::RISCV64EmitUnwindInfo(Streamer, info);
+}
+
 static const MCExpr *GetSubDivExpr(MCStreamer &Streamer, const MCSymbol *LHS,
                                    const MCSymbol *RHS, int Div) {
   MCContext &Context = Streamer.getContext();

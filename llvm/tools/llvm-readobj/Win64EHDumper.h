@@ -23,6 +23,10 @@ namespace Win64EH {
 class Dumper {
   ScopedPrinter &SW;
   raw_ostream &OS;
+  // RISCV64 reuses this x86_64 UNWIND_INFO container but has its own opcode
+  // set and register names, so printing must know which target produced the
+  // data being dumped. See llvm/docs/RISCVWinCFI.md.
+  bool IsRISCV64;
 
 public:
   typedef std::error_code (*SymbolResolver)(const object::coff_section *,
@@ -53,7 +57,8 @@ private:
                             uint64_t SectionOffset, const RuntimeFunction &RF);
 
 public:
-  Dumper(ScopedPrinter &SW) : SW(SW), OS(SW.getOStream()) {}
+  Dumper(ScopedPrinter &SW, bool IsRISCV64 = false)
+      : SW(SW), OS(SW.getOStream()), IsRISCV64(IsRISCV64) {}
 
   void printData(const Context &Ctx);
 };

@@ -33,6 +33,7 @@
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/InitializePasses.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/Compiler.h"
@@ -156,6 +157,8 @@ static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
   if (TT.isOSBinFormatMachO())
     return std::make_unique<RISCVMachOTargetObjectFile>();
+  if (TT.isOSBinFormatCOFF())
+    return std::make_unique<RISCVCOFFTargetObjectFile>();
   return std::make_unique<RISCVELFTargetObjectFile>();
 }
 
@@ -171,6 +174,21 @@ RISCVTargetMachine::RISCVTargetMachine(const Target &T, const Triple &TT,
           getEffectiveCodeModel(CM, CodeModel::Small), OL),
       TLOF(createTLOF(TT)) {
   initAsmInfo();
+
+  if (getMCAsmInfo()->usesWindowsCFI()) {
+    // Unwinding can get confused if the last instruction in an
+    // exception-handling region (function, funclet, try block, etc.)
+    // is a call. The Windows unwinder attributes a return address that
+    // lands on a function boundary to the following function, which makes
+    // RtlVirtualUnwind mis-identify the frame (and can loop forever). Turn
+    // the unreachable after a noreturn call into a trap ("unimp") so the
+    // return address stays inside the calling function, matching what the
+    // AArch64 and X86 Windows backends do (brk / int3).
+    //
+    // FIXME: We could elide the trap if the next instruction would be in
+    // the same region anyway.
+    this->Options.TrapUnreachable = true;
+  }
 
   // RISC-V supports the MachineOutliner.
   setMachineOutliner(true);

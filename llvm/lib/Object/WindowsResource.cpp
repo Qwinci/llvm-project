@@ -992,6 +992,9 @@ void WindowsResourceCOFFWriter::writeFirstSectionRelocations() {
     case Triple::aarch64:
       Reloc->Type = COFF::IMAGE_REL_ARM64_ADDR32NB;
       break;
+    case Triple::riscv64:
+      Reloc->Type = COFF::IMAGE_REL_RISCV64_ADDR32NB;
+      break;
     default:
       llvm_unreachable("unknown machine type");
     }

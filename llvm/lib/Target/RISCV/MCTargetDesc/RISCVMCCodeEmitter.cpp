@@ -35,6 +35,17 @@ using namespace llvm;
 STATISTIC(MCNumEmitted, "Number of MC instructions emitted");
 STATISTIC(MCNumFixups, "Number of MC fixups created");
 
+// The +relax feature is on by default regardless of object format, but only
+// ELF implements linker relaxation (via R_RISCV_RELAX). Marking fixups
+// LinkerRelaxable on COFF has no consumer and breaks constant-folding of
+// symbol differences within a section -- such as .pdata's End-Begin function
+// length -- because MC conservatively refuses to fold across anything a linker
+// might relax.
+static bool enableRelaxation(const MCSubtargetInfo &STI) {
+  return STI.hasFeature(RISCV::FeatureRelax) &&
+         STI.getTargetTriple().isOSBinFormatELF();
+}
+
 namespace {
 class RISCVMCCodeEmitter : public MCCodeEmitter {
   RISCVMCCodeEmitter(const RISCVMCCodeEmitter &) = delete;
@@ -235,7 +246,7 @@ void RISCVMCCodeEmitter::expandAddTPRel(const MCInst &MI,
          "Expected tprel_add relocation on TP-relative symbol");
 
   addFixup(Fixups, 0, Expr, ELF::R_RISCV_TPREL_ADD);
-  if (STI.hasFeature(RISCV::FeatureRelax))
+  if (enableRelaxation(STI))
     Fixups.back().setLinkerRelaxable();
 
   // Emit a normal ADD instruction with the given operands.
@@ -351,7 +362,7 @@ void RISCVMCCodeEmitter::expandLongCondBr(const MCInst &MI,
 
   if (SrcSymbol.isExpr()) {
     addFixup(Fixups, Offset, SrcSymbol.getExpr(), RISCV::fixup_riscv_jal);
-    if (STI.hasFeature(RISCV::FeatureRelax))
+    if (enableRelaxation(STI))
       Fixups.back().setLinkerRelaxable();
   }
 }
@@ -402,7 +413,7 @@ void RISCVMCCodeEmitter::expandQCLongCondBrImm(const MCInst &MI,
   Fixups.resize(FixupStartIndex);
   if (SrcSymbol.isExpr()) {
     addFixup(Fixups, Offset, SrcSymbol.getExpr(), RISCV::fixup_riscv_jal);
-    if (STI.hasFeature(RISCV::FeatureRelax))
+    if (enableRelaxation(STI))
       Fixups.back().setLinkerRelaxable();
   }
 }
@@ -592,7 +603,7 @@ RISCVMCCodeEmitter::getImmOpValueZibi(const MCInst &MI, unsigned OpNo,
 uint64_t RISCVMCCodeEmitter::getImmOpValue(const MCInst &MI, unsigned OpNo,
                                            SmallVectorImpl<MCFixup> &Fixups,
                                            const MCSubtargetInfo &STI) const {
-  bool EnableRelax = STI.hasFeature(RISCV::FeatureRelax);
+  bool EnableRelax = enableRelaxation(STI);
   const MCOperand &MO = MI.getOperand(OpNo);
 
   MCInstrDesc const &Desc = MCII.get(MI.getOpcode());
@@ -678,6 +689,16 @@ uint64_t RISCVMCCodeEmitter::getImmOpValue(const MCInst &MI, unsigned OpNo,
     case RISCV::S_QC_ABS20:
       FixupKind = RISCV::fixup_riscv_qc_abs20_u;
       RelaxCandidate = true;
+      break;
+    case RISCV::S_TLS_SECREL_HI:
+      FixupKind = RISCV::fixup_riscv_tls_secrel_hi20;
+      break;
+    case RISCV::S_TLS_SECREL_LO:
+      if (MIFrm == RISCVII::InstFormatI)
+        FixupKind = RISCV::fixup_riscv_tls_secrel_lo12_i;
+      else
+        llvm_unreachable(
+            "S_TLS_SECREL_LO used with unexpected instruction format");
       break;
     case ELF::R_RISCV_GOT_HI20:
     case ELF::R_RISCV_TPREL_HI20:

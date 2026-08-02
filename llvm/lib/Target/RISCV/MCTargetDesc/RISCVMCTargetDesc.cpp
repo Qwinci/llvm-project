@@ -17,6 +17,7 @@
 #include "RISCVMCObjectFileInfo.h"
 #include "RISCVTargetStreamer.h"
 #include "TargetInfo/RISCVTargetInfo.h"
+#include "llvm/DebugInfo/CodeView/CodeView.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCCodeEmitter.h"
@@ -51,9 +52,99 @@ static MCInstrInfo *createRISCVMCInstrInfo() {
   return X;
 }
 
+void RISCV_MC::initLLVMToCVRegMapping(MCRegisterInfo *MRI) {
+  static const struct {
+    codeview::RegisterId CVReg;
+    MCPhysReg Reg;
+  } RegMap[] = {
+      {codeview::RegisterId::RISCV64_X0, RISCV::X0},
+      {codeview::RegisterId::RISCV64_X1, RISCV::X1},
+      {codeview::RegisterId::RISCV64_X2, RISCV::X2},
+      {codeview::RegisterId::RISCV64_X3, RISCV::X3},
+      {codeview::RegisterId::RISCV64_X4, RISCV::X4},
+      {codeview::RegisterId::RISCV64_X5, RISCV::X5},
+      {codeview::RegisterId::RISCV64_X6, RISCV::X6},
+      {codeview::RegisterId::RISCV64_X7, RISCV::X7},
+      {codeview::RegisterId::RISCV64_X8, RISCV::X8},
+      {codeview::RegisterId::RISCV64_X9, RISCV::X9},
+      {codeview::RegisterId::RISCV64_X10, RISCV::X10},
+      {codeview::RegisterId::RISCV64_X11, RISCV::X11},
+      {codeview::RegisterId::RISCV64_X12, RISCV::X12},
+      {codeview::RegisterId::RISCV64_X13, RISCV::X13},
+      {codeview::RegisterId::RISCV64_X14, RISCV::X14},
+      {codeview::RegisterId::RISCV64_X15, RISCV::X15},
+      {codeview::RegisterId::RISCV64_X16, RISCV::X16},
+      {codeview::RegisterId::RISCV64_X17, RISCV::X17},
+      {codeview::RegisterId::RISCV64_X18, RISCV::X18},
+      {codeview::RegisterId::RISCV64_X19, RISCV::X19},
+      {codeview::RegisterId::RISCV64_X20, RISCV::X20},
+      {codeview::RegisterId::RISCV64_X21, RISCV::X21},
+      {codeview::RegisterId::RISCV64_X22, RISCV::X22},
+      {codeview::RegisterId::RISCV64_X23, RISCV::X23},
+      {codeview::RegisterId::RISCV64_X24, RISCV::X24},
+      {codeview::RegisterId::RISCV64_X25, RISCV::X25},
+      {codeview::RegisterId::RISCV64_X26, RISCV::X26},
+      {codeview::RegisterId::RISCV64_X27, RISCV::X27},
+      {codeview::RegisterId::RISCV64_X28, RISCV::X28},
+      {codeview::RegisterId::RISCV64_X29, RISCV::X29},
+      {codeview::RegisterId::RISCV64_X30, RISCV::X30},
+      {codeview::RegisterId::RISCV64_X31, RISCV::X31},
+  };
+  for (const auto &I : RegMap)
+    MRI->mapLLVMRegToCVReg(I.Reg, static_cast<int>(I.CVReg));
+
+  // Each floating-point register has several width views that are distinct
+  // MCRegisters aliasing the same physical FPR: F#_H (Zfh half), F#_F (single),
+  // F#_D (double) and F#_Q (quad). The CodeView register lookup is exact and
+  // RISCV64 defines a single CodeView id per FPR, so every width view of F#
+  // must map to RISCV64_F#. clang emits a debug location naming whichever view
+  // matches the variable's type (e.g. F#_F for a `float`), so mapping only the
+  // _D view crashed on any single- or half-precision code.
+  static const MCPhysReg FPRegViews[32][4] = {
+      {RISCV::F0_H, RISCV::F0_F, RISCV::F0_D, RISCV::F0_Q},
+      {RISCV::F1_H, RISCV::F1_F, RISCV::F1_D, RISCV::F1_Q},
+      {RISCV::F2_H, RISCV::F2_F, RISCV::F2_D, RISCV::F2_Q},
+      {RISCV::F3_H, RISCV::F3_F, RISCV::F3_D, RISCV::F3_Q},
+      {RISCV::F4_H, RISCV::F4_F, RISCV::F4_D, RISCV::F4_Q},
+      {RISCV::F5_H, RISCV::F5_F, RISCV::F5_D, RISCV::F5_Q},
+      {RISCV::F6_H, RISCV::F6_F, RISCV::F6_D, RISCV::F6_Q},
+      {RISCV::F7_H, RISCV::F7_F, RISCV::F7_D, RISCV::F7_Q},
+      {RISCV::F8_H, RISCV::F8_F, RISCV::F8_D, RISCV::F8_Q},
+      {RISCV::F9_H, RISCV::F9_F, RISCV::F9_D, RISCV::F9_Q},
+      {RISCV::F10_H, RISCV::F10_F, RISCV::F10_D, RISCV::F10_Q},
+      {RISCV::F11_H, RISCV::F11_F, RISCV::F11_D, RISCV::F11_Q},
+      {RISCV::F12_H, RISCV::F12_F, RISCV::F12_D, RISCV::F12_Q},
+      {RISCV::F13_H, RISCV::F13_F, RISCV::F13_D, RISCV::F13_Q},
+      {RISCV::F14_H, RISCV::F14_F, RISCV::F14_D, RISCV::F14_Q},
+      {RISCV::F15_H, RISCV::F15_F, RISCV::F15_D, RISCV::F15_Q},
+      {RISCV::F16_H, RISCV::F16_F, RISCV::F16_D, RISCV::F16_Q},
+      {RISCV::F17_H, RISCV::F17_F, RISCV::F17_D, RISCV::F17_Q},
+      {RISCV::F18_H, RISCV::F18_F, RISCV::F18_D, RISCV::F18_Q},
+      {RISCV::F19_H, RISCV::F19_F, RISCV::F19_D, RISCV::F19_Q},
+      {RISCV::F20_H, RISCV::F20_F, RISCV::F20_D, RISCV::F20_Q},
+      {RISCV::F21_H, RISCV::F21_F, RISCV::F21_D, RISCV::F21_Q},
+      {RISCV::F22_H, RISCV::F22_F, RISCV::F22_D, RISCV::F22_Q},
+      {RISCV::F23_H, RISCV::F23_F, RISCV::F23_D, RISCV::F23_Q},
+      {RISCV::F24_H, RISCV::F24_F, RISCV::F24_D, RISCV::F24_Q},
+      {RISCV::F25_H, RISCV::F25_F, RISCV::F25_D, RISCV::F25_Q},
+      {RISCV::F26_H, RISCV::F26_F, RISCV::F26_D, RISCV::F26_Q},
+      {RISCV::F27_H, RISCV::F27_F, RISCV::F27_D, RISCV::F27_Q},
+      {RISCV::F28_H, RISCV::F28_F, RISCV::F28_D, RISCV::F28_Q},
+      {RISCV::F29_H, RISCV::F29_F, RISCV::F29_D, RISCV::F29_Q},
+      {RISCV::F30_H, RISCV::F30_F, RISCV::F30_D, RISCV::F30_Q},
+      {RISCV::F31_H, RISCV::F31_F, RISCV::F31_D, RISCV::F31_Q},
+  };
+  for (unsigned I = 0; I < 32; ++I) {
+    int CVReg = static_cast<int>(codeview::RegisterId::RISCV64_F0) + I;
+    for (MCPhysReg View : FPRegViews[I])
+      MRI->mapLLVMRegToCVReg(View, CVReg);
+  }
+}
+
 static MCRegisterInfo *createRISCVMCRegisterInfo(const Triple &TT) {
   MCRegisterInfo *X = new MCRegisterInfo();
   InitRISCVMCRegisterInfo(X, RISCV::X1);
+  RISCV_MC::initLLVMToCVRegMapping(X);
   return X;
 }
 
@@ -65,6 +156,10 @@ static MCAsmInfo *createRISCVMCAsmInfo(const MCRegisterInfo &MRI,
     MAI = new RISCVMCAsmInfo(TT);
   else if (TT.isOSBinFormatMachO())
     MAI = new RISCVMCAsmInfoDarwin();
+  else if (TT.isWindowsMSVCEnvironment())
+    MAI = new RISCVMCAsmInfoMicrosoftCOFF();
+  else if (TT.isOSBinFormatCOFF())
+    MAI = new RISCVMCAsmInfoGNUCOFF();
   else
     reportFatalUsageError("unsupported object format");
 
@@ -119,6 +214,8 @@ createRISCVObjectTargetStreamer(MCStreamer &S, const MCSubtargetInfo &STI) {
   const Triple &TT = STI.getTargetTriple();
   if (TT.isOSBinFormatELF())
     return new RISCVTargetELFStreamer(S, STI);
+  if (TT.isOSBinFormatCOFF())
+    return new RISCVTargetWinCOFFStreamer(S);
   return new RISCVTargetStreamer(S);
 }
 
@@ -404,6 +501,7 @@ LLVMInitializeRISCVTargetMC() {
     TargetRegistry::RegisterMCSubtargetInfo(*T, createRISCVMCSubtargetInfo);
     TargetRegistry::RegisterELFStreamer(*T, createRISCVELFStreamer);
     TargetRegistry::RegisterMachOStreamer(*T, createMachOStreamer);
+    TargetRegistry::RegisterCOFFStreamer(*T, createRISCVWinCOFFStreamer);
     TargetRegistry::RegisterObjectTargetStreamer(
         *T, createRISCVObjectTargetStreamer);
     TargetRegistry::RegisterMCInstrAnalysis(*T, createRISCVInstrAnalysis);

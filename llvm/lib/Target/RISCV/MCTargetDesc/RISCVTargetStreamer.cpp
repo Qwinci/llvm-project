@@ -12,6 +12,7 @@
 
 #include "RISCVTargetStreamer.h"
 #include "RISCVBaseInfo.h"
+#include "RISCVInstPrinter.h"
 #include "RISCVMCTargetDesc.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCContext.h"
@@ -188,3 +189,33 @@ void RISCVTargetAsmStreamer::emitIntTextAttribute(unsigned Attribute,
                                                   StringRef StringValue) {}
 
 void RISCVTargetAsmStreamer::finishAttributeSection() {}
+
+void RISCVTargetAsmStreamer::emitRISCVWinCFISaveReg(unsigned Reg, int Offset,
+                                                    SMLoc Loc) {
+  OS << "\t.seh_savereg\t" << RISCVInstPrinter::getRegisterName(Reg) << ", "
+     << Offset << "\n";
+}
+
+void RISCVTargetAsmStreamer::emitRISCVWinCFISaveFReg(unsigned Reg, int Offset,
+                                                     SMLoc Loc) {
+  OS << "\t.seh_savefreg\t" << RISCVInstPrinter::getRegisterName(Reg) << ", "
+     << Offset << "\n";
+}
+
+void RISCVTargetAsmStreamer::emitRISCVWinCFISetFrame(unsigned Reg, int Offset,
+                                                     SMLoc Loc) {
+  OS << "\t.seh_setframe\t" << RISCVInstPrinter::getRegisterName(Reg) << ", "
+     << Offset << "\n";
+}
+
+void RISCVTargetAsmStreamer::emitRISCVWinCFITrapFrame(SMLoc Loc) {
+  OS << "\t.seh_trap_frame\n";
+}
+
+void RISCVTargetAsmStreamer::emitRISCVWinCFIContext(SMLoc Loc) {
+  OS << "\t.seh_context\n";
+}
+
+void RISCVTargetAsmStreamer::emitRISCVWinCFIClearUnwoundToCall(SMLoc Loc) {
+  OS << "\t.seh_clear_unwound_to_call\n";
+}

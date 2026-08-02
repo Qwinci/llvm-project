@@ -37,6 +37,8 @@ RISCV::Specifier RISCV::parseSpecifierName(StringRef name) {
       .Case("tlsdesc_add_lo", ELF::R_RISCV_TLSDESC_ADD_LO12)
       .Case("tlsdesc_call", ELF::R_RISCV_TLSDESC_CALL)
       .Case("qc.abs20", RISCV::S_QC_ABS20)
+      .Case("tls_secrel_hi", RISCV::S_TLS_SECREL_HI)
+      .Case("tls_secrel_lo", RISCV::S_TLS_SECREL_LO)
       // Used in data directives
       .Case("pltpcrel", ELF::R_RISCV_PLT32)
       .Case("gotpcrel", ELF::R_RISCV_GOT32_PCREL)
@@ -85,6 +87,10 @@ StringRef RISCV::getSpecifierName(Specifier S) {
     return "pltpcrel";
   case RISCV::S_QC_ABS20:
     return "qc.abs20";
+  case RISCV::S_TLS_SECREL_HI:
+    return "tls_secrel_hi";
+  case RISCV::S_TLS_SECREL_LO:
+    return "tls_secrel_lo";
   }
   llvm_unreachable("Invalid ELF symbol kind");
 }

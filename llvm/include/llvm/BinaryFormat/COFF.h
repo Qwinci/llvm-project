@@ -132,7 +132,8 @@ template <typename T> bool isAnyArm64(T Machine) {
 }
 
 template <typename T> bool is64Bit(T Machine) {
-  return Machine == IMAGE_FILE_MACHINE_AMD64 || isAnyArm64(Machine);
+  return Machine == IMAGE_FILE_MACHINE_AMD64 || isAnyArm64(Machine) ||
+         Machine == IMAGE_FILE_MACHINE_RISCV64;
 }
 
 enum Characteristics : unsigned {
@@ -416,6 +417,33 @@ enum RelocationTypesARM64 : unsigned {
   IMAGE_REL_ARM64_BRANCH19 = 0x000F,
   IMAGE_REL_ARM64_BRANCH14 = 0x0010,
   IMAGE_REL_ARM64_REL32 = 0x0011,
+};
+
+// Microsoft has not defined RISCV64 COFF relocations; the numbering below is
+// LLVM's own, shared by MC (RISCVWinCOFFObjectWriter) and lld/COFF. See
+// llvm/docs/RISCVWinCFI.md.
+enum RelocationTypesRISCV64 : unsigned {
+  IMAGE_REL_RISCV64_ABSOLUTE = 0x0000,
+  IMAGE_REL_RISCV64_ADDR32 = 0x0001,
+  IMAGE_REL_RISCV64_ADDR64 = 0x0002,
+  IMAGE_REL_RISCV64_ADDR32NB = 0x0003,
+  IMAGE_REL_RISCV64_SECTION = 0x0004,
+  IMAGE_REL_RISCV64_SECREL = 0x0005,
+  IMAGE_REL_RISCV64_PCREL_HI20 = 0x0006,
+  IMAGE_REL_RISCV64_PCREL_LO12_I = 0x0007,
+  IMAGE_REL_RISCV64_PCREL_LO12_S = 0x0008,
+  IMAGE_REL_RISCV64_JAL = 0x0009,
+  IMAGE_REL_RISCV64_BRANCH = 0x000A,
+  IMAGE_REL_RISCV64_RVC_JUMP = 0x000B,
+  IMAGE_REL_RISCV64_RVC_BRANCH = 0x000C,
+  IMAGE_REL_RISCV64_CALL = 0x000D,
+  IMAGE_REL_RISCV64_REL32 = 0x000E,
+  // Split a symbol's 32-bit offset within its section across a LUI+ADDI pair,
+  // the way PCREL_HI20/LO12_I split a pc-relative address across AUIPC+ADDI.
+  // Used for Windows TLS, where the offset is added to a TLS base computed at
+  // runtime rather than to the current instruction's address.
+  IMAGE_REL_RISCV64_SECREL_HI20 = 0x000F,
+  IMAGE_REL_RISCV64_SECREL_LO12_I = 0x0010,
 };
 
 enum RelocationTypesMips : unsigned {

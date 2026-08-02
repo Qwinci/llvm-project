@@ -359,6 +359,9 @@ const EnumEntry<COFF::MachineTypes> ImageFileMachineType[] = {
   LLVM_READOBJ_ENUM_ENT(COFF, IMAGE_FILE_MACHINE_POWERPC  ),
   LLVM_READOBJ_ENUM_ENT(COFF, IMAGE_FILE_MACHINE_POWERPCFP),
   LLVM_READOBJ_ENUM_ENT(COFF, IMAGE_FILE_MACHINE_R4000    ),
+  LLVM_READOBJ_ENUM_ENT(COFF, IMAGE_FILE_MACHINE_RISCV32  ),
+  LLVM_READOBJ_ENUM_ENT(COFF, IMAGE_FILE_MACHINE_RISCV64  ),
+  LLVM_READOBJ_ENUM_ENT(COFF, IMAGE_FILE_MACHINE_RISCV128 ),
   LLVM_READOBJ_ENUM_ENT(COFF, IMAGE_FILE_MACHINE_SH3      ),
   LLVM_READOBJ_ENUM_ENT(COFF, IMAGE_FILE_MACHINE_SH3DSP   ),
   LLVM_READOBJ_ENUM_ENT(COFF, IMAGE_FILE_MACHINE_SH4      ),
@@ -1803,8 +1806,13 @@ void COFFDumper::printSymbol(const SymbolRef &Sym) {
 void COFFDumper::printUnwindInfo() {
   ListScope D(W, "UnwindInformation");
   switch (Obj->getMachine()) {
-  case COFF::IMAGE_FILE_MACHINE_AMD64: {
-    Win64EH::Dumper Dumper(W);
+  case COFF::IMAGE_FILE_MACHINE_AMD64:
+  case COFF::IMAGE_FILE_MACHINE_RISCV64: {
+    // RISCV64 reuses x86_64's UNWIND_INFO container with its own opcode and
+    // register set (see llvm/docs/RISCVWinCFI.md), so one Dumper handles both
+    // and only needs to know which names to print.
+    Win64EH::Dumper Dumper(W, Obj->getMachine() ==
+                                  COFF::IMAGE_FILE_MACHINE_RISCV64);
     Win64EH::Dumper::SymbolResolver
     Resolver = [](const object::coff_section *Section, uint64_t Offset,
                   SymbolRef &Symbol, void *user_data) -> std::error_code {

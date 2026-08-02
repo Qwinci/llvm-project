@@ -22,7 +22,10 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
+#include "llvm/CodeGen/WinEHFuncInfo.h"
 #include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/IR/EHPersonalities.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/Support/LEB128.h"
 
@@ -98,6 +101,49 @@ static const std::pair<MCPhysReg, int8_t> FixedCSRFIQCIInterruptMap[] = {
 /// Returns true if DWARF CFI instructions ("frame moves") should be emitted.
 static bool needsDwarfCFI(const MachineFunction &MF) {
   return MF.needsFrameMoves();
+}
+
+/// Returns true if Windows SEH unwind-code pseudo instructions should be
+/// emitted.
+static bool needsWinCFI(const MachineFunction &MF) {
+  return MF.getTarget().getMCAsmInfo()->usesWindowsCFI() &&
+         MF.getFunction().needsUnwindTableEntry();
+}
+
+// Insert one SEH_SaveReg/SEH_SaveFReg pseudo directly after each callee-saved
+// register spill. Unlike the DWARF CFI directives above these cannot be
+// batched: each unwind code's CodeOffset must name the exact point at which
+// that register was saved, so a fault mid-prologue still unwinds correctly.
+//
+// The offset comes from MFI.getObjectOffset() rather than from the spill
+// instruction's own operand, which is still an unresolved frame index at this
+// point in the pipeline. getObjectOffset() is relative to SP at function
+// entry, whereas the xdata needs the offset from the post-allocation SP the
+// store will actually use; RealStackSize converts between the two.
+static void
+insertSEHCSRSpills(MachineBasicBlock &MBB, MachineBasicBlock::iterator Begin,
+                   ArrayRef<CalleeSavedInfo> CSI, const MachineFrameInfo &MFI,
+                   uint64_t RealStackSize, const RISCVInstrInfo &TII) {
+  MachineBasicBlock::iterator I = Begin;
+  for (const CalleeSavedInfo &CS : CSI) {
+    MachineInstr &StoreMI = *I;
+    unsigned Opc = StoreMI.getOpcode();
+    if (Opc != RISCV::SD && Opc != RISCV::FSD)
+      reportFatalUsageError(
+          "unsupported callee-saved register spill instruction for Windows "
+          "SEH unwind info generation");
+    int64_t Offset = MFI.getObjectOffset(CS.getFrameIdx()) + RealStackSize;
+    DebugLoc DL = StoreMI.getDebugLoc();
+    unsigned SEHOpc =
+        Opc == RISCV::SD ? RISCV::SEH_SaveReg : RISCV::SEH_SaveFReg;
+    BuildMI(MBB, std::next(I), DL, TII.get(SEHOpc))
+        .addImm(CS.getReg())
+        .addImm(Offset)
+        .setMIFlag(MachineInstr::FrameSetup);
+    // Skip over both the just-visited real instruction and the pseudo just
+    // inserted immediately after it.
+    I = std::next(I, 2);
+  }
 }
 
 // For now we use x3, a.k.a gp, as pointer to shadow call stack.
@@ -488,7 +534,16 @@ bool RISCVFrameLowering::hasFPImpl(const MachineFunction &MF) const {
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   return MF.getTarget().Options.DisableFramePointerElim(MF) ||
          RegInfo->hasStackRealignment(MF) || MFI.hasVarSizedObjects() ||
-         MFI.isFrameAddressTaken();
+         MFI.isFrameAddressTaken() || MF.hasEHFunclets();
+}
+
+unsigned
+RISCVFrameLowering::getWinEHParentFrameOffset(const MachineFunction &MF) const {
+  // The offset the Windows C++ EH runtime adds to a funclet's establisher frame
+  // to recover the parent function's frame pointer. A synchronous EH funclet is
+  // entered with FP already equal to the parent's frame pointer (see
+  // emitPrologue), so no adjustment is needed. Matches AArch64.
+  return 0;
 }
 
 bool RISCVFrameLowering::hasBP(const MachineFunction &MF) const {
@@ -861,6 +916,47 @@ void RISCVFrameLowering::allocateStack(MachineBasicBlock &MBB,
     CFIBuilder.buildDefCFAOffset(Offset);
 }
 
+bool RISCVFrameLowering::windowsRequiresStackProbe(
+    const MachineFunction &MF, uint64_t StackSizeInBytes) const {
+  if (!STI.getTargetTriple().isOSWindows() ||
+      MF.getFunction().hasFnAttribute("no-stack-arg-probe"))
+    return false;
+  const RISCVTargetLowering *TLI = STI.getTargetLowering();
+  return StackSizeInBytes >= TLI->getStackProbeSize(MF, getStackAlign());
+}
+
+void RISCVFrameLowering::emitWindowsChkstkCall(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+    const DebugLoc &DL, uint64_t Offset, MachineInstr::MIFlag Flag) const {
+  const RISCVInstrInfo *TII = STI.getInstrInfo();
+  const RISCVRegisterInfo *RI = STI.getRegisterInfo();
+  const RISCVTargetLowering *TLI = STI.getTargetLowering();
+
+  RTLIB::LibcallImpl ChkStkLibcall = TLI->getLibcallImpl(RTLIB::STACK_PROBE);
+  if (ChkStkLibcall == RTLIB::Unsupported)
+    report_fatal_error("no available implementation of __chkstk");
+  const char *ChkStk = TLI->getLibcallImplName(ChkStkLibcall).data();
+
+  // __chkstk takes the byte count in X6/t1 -- the register the inline probe
+  // loop above already uses as its scratch -- and touches one word in every
+  // page between SP and SP-X6 so the guard page is hit in order. It modifies
+  // neither SP nor X6, only the scratch registers listed below. See
+  // compiler-rt/lib/builtins/riscv/chkstk.S.
+  TII->movImm(MBB, MBBI, DL, RISCV::X6, Offset, Flag);
+  BuildMI(MBB, MBBI, DL, TII->get(RISCV::PseudoCALL))
+      .addExternalSymbol(ChkStk, RISCVII::MO_CALL)
+      .addReg(RISCV::X6, RegState::Implicit)
+      .addReg(RISCV::X7, RegState::Implicit | RegState::Define | RegState::Dead)
+      .addReg(RISCV::X28,
+              RegState::Implicit | RegState::Define | RegState::Dead)
+      .addReg(RISCV::X29,
+              RegState::Implicit | RegState::Define | RegState::Dead)
+      .setMIFlag(Flag);
+
+  RI->adjustReg(MBB, MBBI, DL, SPReg, SPReg, StackOffset::getFixed(-Offset),
+                Flag, getStackAlign());
+}
+
 static bool isPush(unsigned Opcode) {
   switch (Opcode) {
   case RISCV::CM_PUSH:
@@ -952,8 +1048,32 @@ void RISCVFrameLowering::emitPrologue(MachineFunction &MF,
   // callee-saved register.
   MBBI = std::prev(MBBI, getRVVCalleeSavedInfo(MF, CSI).size() +
                              getUnmanagedCSI(MF, CSI).size());
+  MachineBasicBlock::iterator CSRSpillBegin = MBBI;
   CFIInstBuilder CFIBuilder(MBB, MBBI, MachineInstr::FrameSetup);
   bool NeedsDwarfCFI = needsDwarfCFI(MF);
+  bool NeedsWinCFI = needsWinCFI(MF);
+  const RISCVInstrInfo *TII = STI.getInstrInfo();
+
+  // The xdata encoding only describes the plain prologue shape handled below.
+  // Diagnose anything beyond that -- still compiling the function -- rather
+  // than silently emitting incorrect unwind info.
+  //
+  // Stack realignment (an over-aligned local, with or without a variable-sized
+  // object forcing a base pointer) is *not* on this list: the frame pointer is
+  // established before the realigning `andi`, so it anchors the CFA and all
+  // callee-save offsets exactly as x86-64's UWOP_SET_FPREG does, and the
+  // realignment / base-pointer moves are SP-only and need no unwind code. See
+  // llvm/docs/RISCVWinCFI.md and the .seh_setframe emission below.
+  if (NeedsWinCFI && (!getRVVCalleeSavedInfo(MF, CSI).empty() ||
+                      RVFI->getRVVStackSize() || RVFI->useQCIInterrupt(MF) ||
+                      RVFI->isPushable(MF) || getSpillLibCallName(MF, CSI))) {
+    MF.getFunction().getContext().diagnose(DiagnosticInfoUnsupported{
+        MF.getFunction(),
+        "this function's prologue uses a feature not yet supported for "
+        "Windows SEH unwind info generation; unwind info for this function "
+        "may be missing or incomplete"});
+    NeedsWinCFI = false;
+  }
 
   // If libcalls are used to spill and restore callee-saved registers, the frame
   // has two sections; the opaque section managed by the libcalls, and the
@@ -996,8 +1116,16 @@ void RISCVFrameLowering::emitPrologue(MachineFunction &MF,
   uint64_t RVVStackSize = RVFI->getRVVStackSize();
 
   // Early exit if there is no need to allocate on the stack
-  if (RealStackSize == 0 && !MFI.adjustsStack() && RVVStackSize == 0)
+  if (RealStackSize == 0 && !MFI.adjustsStack() && RVVStackSize == 0) {
+    // A frame-less function still needs an (empty) SEH prologue so that
+    // .pdata/.xdata are emitted for it.
+    if (NeedsWinCFI) {
+      BuildMI(MBB, MBBI, DL, TII->get(RISCV::SEH_PrologEnd))
+          .setMIFlag(MachineInstr::FrameSetup);
+      MF.setHasWinCFI(true);
+    }
     return;
+  }
 
   // If the stack pointer has been marked as reserved, then produce an error if
   // the frame requires stack allocation
@@ -1056,10 +1184,31 @@ void RISCVFrameLowering::emitPrologue(MachineFunction &MF,
   uint64_t ProbeSize = TLI->getStackProbeSize(MF, getStackAlign());
   bool DynAllocation =
       MF.getInfo<RISCVMachineFunctionInfo>()->hasDynamicAllocation();
-  if (StackSize != 0)
-    allocateStack(MBB, MBBI, MF, StackSize, RealStackSize, NeedsDwarfCFI,
-                  NeedProbe, ProbeSize, DynAllocation,
-                  MachineInstr::FrameSetup);
+  if (NeedsWinCFI && NeedProbe) {
+    MF.getFunction().getContext().diagnose(DiagnosticInfoUnsupported{
+        MF.getFunction(),
+        "stack probing is not yet supported for Windows SEH unwind info "
+        "generation; unwind info for this function may be missing or "
+        "incomplete"});
+    NeedsWinCFI = false;
+  }
+  // The inline probe loop above is opt-in via "probe-stack"="inline-asm", but
+  // Windows requires every sufficiently large frame to be probed so the OS
+  // guard page is hit in order rather than skipped over.
+  bool NeedOutlineProbe =
+      !NeedProbe && windowsRequiresStackProbe(MF, StackSize);
+  if (StackSize != 0) {
+    if (NeedOutlineProbe)
+      emitWindowsChkstkCall(MBB, MBBI, DL, StackSize, MachineInstr::FrameSetup);
+    else
+      allocateStack(MBB, MBBI, MF, StackSize, RealStackSize, NeedsDwarfCFI,
+                    NeedProbe, ProbeSize, DynAllocation,
+                    MachineInstr::FrameSetup);
+    if (NeedsWinCFI)
+      BuildMI(MBB, MBBI, DL, TII->get(RISCV::SEH_StackAlloc))
+          .addImm(StackSize)
+          .setMIFlag(MachineInstr::FrameSetup);
+  }
 
   // Save SiFive CLIC CSRs into Stack
   emitSiFiveCLICPreemptibleSaves(MF, MBB, MBBI, DL);
@@ -1080,8 +1229,26 @@ void RISCVFrameLowering::emitPrologue(MachineFunction &MF,
       CFIBuilder.buildOffset(CS.getReg(),
                              MFI.getObjectOffset(CS.getFrameIdx()));
 
+  if (NeedsWinCFI)
+    insertSEHCSRSpills(MBB, CSRSpillBegin, getUnmanagedCSI(MF, CSI), MFI,
+                       RealStackSize, *TII);
+
+  // An EH funclet must not derive its frame pointer from its own SP: FP has to
+  // point at the *parent* function's frame so accesses to the parent's locals
+  // (llvm.localrecover / WinEHPrepare's FP-relative rewrites) resolve. A
+  // synchronous (C++) funclet is entered with FP already set by the personality
+  // routine, so nothing is emitted. An asynchronous (SEH) funclet is passed the
+  // parent's establisher frame in a1 and copies it into FP after the prologue
+  // (see below). Either way skip the normal SP-relative setup here; FP is still
+  // saved and restored as a callee-saved register. Mirrors AArch64.
+  bool IsFunclet = MBB.isEHFuncletEntry();
+  bool IsAsyncEHFunclet =
+      IsFunclet && MF.getFunction().hasPersonalityFn() &&
+      isAsynchronousEHPersonality(
+          classifyEHPersonality(MF.getFunction().getPersonalityFn()));
+
   // Generate new FP.
-  if (hasFP(MF)) {
+  if (hasFP(MF) && !IsFunclet) {
     if (STI.isRegisterReservedByUser(FPReg))
       MF.getFunction().getContext().diagnose(DiagnosticInfoUnsupported{
           MF.getFunction(), "Frame pointer required, but has been reserved."});
@@ -1099,6 +1266,32 @@ void RISCVFrameLowering::emitPrologue(MachineFunction &MF,
 
     if (NeedsDwarfCFI)
       CFIBuilder.buildDefCFA(FPReg, RVFI->getVarArgsSaveSize());
+
+    if (NeedsWinCFI) {
+      int64_t FPOffset = RealStackSize - RVFI->getVarArgsSaveSize();
+      // .seh_setframe encodes its offset in the whole FrameRegisterAndOffset
+      // byte, scaled by 16, giving a 0-4080 range (see
+      // RISCVTargetWinCOFFStreamer::emitRISCVWinCFISetFrame).
+      if (FPOffset < 0 || FPOffset > 4080 || (FPOffset & 0xF))
+        MF.getFunction().getContext().diagnose(DiagnosticInfoUnsupported{
+            MF.getFunction(),
+            "frame pointer offset is out of range for Windows SEH unwind "
+            "info generation; unwind info for this function may be "
+            "missing or incomplete"});
+      else {
+        BuildMI(MBB, MBBI, DL, TII->get(RISCV::SEH_SetFrame))
+            .addImm(FPReg)
+            .addImm(FPOffset)
+            .setMIFlag(MachineInstr::FrameSetup);
+        // Record the offset so WinException::emitCSpecificHandlerTable can
+        // point a filter/handler funclet back at this frame via
+        // llvm.eh.recoverfp, as X86FrameLowering does.
+        if (MF.hasEHFunclets() &&
+            isAsynchronousEHPersonality(
+                classifyEHPersonality(MF.getFunction().getPersonalityFn())))
+          MF.getWinEHFuncInfo()->SEHSetFrameOffset = FPOffset;
+      }
+    }
   }
 
   uint64_t SecondSPAdjustAmount = 0;
@@ -1108,10 +1301,21 @@ void RISCVFrameLowering::emitPrologue(MachineFunction &MF,
     assert(SecondSPAdjustAmount > 0 &&
            "SecondSPAdjustAmount should be greater than zero");
 
-    allocateStack(MBB, MBBI, MF, SecondSPAdjustAmount,
-                  getStackSizeWithRVVPadding(MF), NeedsDwarfCFI && !hasFP(MF),
-                  NeedProbe, ProbeSize, DynAllocation,
-                  MachineInstr::FrameSetup);
+    if (!NeedProbe && windowsRequiresStackProbe(MF, SecondSPAdjustAmount))
+      emitWindowsChkstkCall(MBB, MBBI, DL, SecondSPAdjustAmount,
+                            MachineInstr::FrameSetup);
+    else
+      allocateStack(MBB, MBBI, MF, SecondSPAdjustAmount,
+                    getStackSizeWithRVVPadding(MF), NeedsDwarfCFI && !hasFP(MF),
+                    NeedProbe, ProbeSize, DynAllocation,
+                    MachineInstr::FrameSetup);
+    // Once a frame pointer is established it, not SP, is the unwind anchor, so
+    // a further SP-only adjustment needs no unwind code -- mirroring the
+    // NeedsDwarfCFI && !hasFP(MF) condition just above.
+    if (NeedsWinCFI && !hasFP(MF))
+      BuildMI(MBB, MBBI, DL, TII->get(RISCV::SEH_StackAlloc))
+          .addImm(SecondSPAdjustAmount)
+          .setMIFlag(MachineInstr::FrameSetup);
   }
 
   if (RVVStackSize) {
@@ -1189,6 +1393,25 @@ void RISCVFrameLowering::emitPrologue(MachineFunction &MF,
       }
     }
   }
+
+  if (NeedsWinCFI) {
+    BuildMI(MBB, MBBI, DL, TII->get(RISCV::SEH_PrologEnd))
+        .setMIFlag(MachineInstr::FrameSetup);
+    MF.setHasWinCFI(true);
+  }
+
+  // An asynchronous (SEH) EH funclet is entered by the runtime with the parent's
+  // establisher frame in a1 (the second termination/filter-handler argument,
+  // PVOID EstablisherFrame). Copy it into FP so llvm.localrecover reaches the
+  // parent's escaped locals. Emitted after the prologue and without a WinCFI
+  // frame directive because it re-points FP at the parent frame rather than
+  // describing this funclet's own frame (FP is still saved/restored as a normal
+  // callee-saved register). Mirrors AArch64's `mov x29, x1`.
+  if (IsAsyncEHFunclet) {
+    BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::COPY), FPReg)
+        .addReg(RISCV::X11);
+    MBB.addLiveIn(RISCV::X11);
+  }
 }
 
 void RISCVFrameLowering::deallocateStack(MachineFunction &MF,
@@ -1256,8 +1479,20 @@ void RISCVFrameLowering::emitEpilogue(MachineFunction &MF,
   uint64_t FPOffset = RealStackSize - RVFI->getVarArgsSaveSize();
   uint64_t RVVStackSize = RVFI->getRVVStackSize();
 
-  bool RestoreSPFromFP = RI->hasStackRealignment(MF) ||
-                         MFI.hasVarSizedObjects() || !hasReservedCallFrame(MF);
+  // An EH funclet never sets up its own SP-relative frame pointer (see
+  // emitPrologue): FP holds the *parent's* frame pointer throughout -- inherited
+  // for a C++ funclet, copied from a1 for an SEH funclet -- so it cannot be used
+  // to restore the funclet's SP. Restore SP from the funclet's own stack size
+  // instead. Funclets have a reserved call frame and no variable sized objects,
+  // so the plain SP adjustment below is sufficient. Every funclet ends in
+  // cleanupret/catchret, so those terminators identify one.
+  bool IsFunclet = llvm::any_of(MBB.terminators(), [](const auto &MI) {
+    return MI.getOpcode() == RISCV::CLEANUPRET ||
+           MI.getOpcode() == RISCV::CATCHRET;
+  });
+  bool RestoreSPFromFP = !IsFunclet &&
+                         (RI->hasStackRealignment(MF) ||
+                          MFI.hasVarSizedObjects() || !hasReservedCallFrame(MF));
   if (RVVStackSize) {
     // If RestoreSPFromFP the stack pointer will be restored using the frame
     // pointer value.
@@ -1379,6 +1614,24 @@ void RISCVFrameLowering::emitEpilogue(MachineFunction &MF,
 
   // SiFive CLIC needs to swap `sf.mscratchcsw` into `sp`
   emitSiFiveCLICStackSwap(MF, MBB, MBBI, DL);
+}
+
+StackOffset RISCVFrameLowering::getFrameIndexReferencePreferSP(
+    const MachineFunction &MF, int FI, Register &FrameReg,
+    bool IgnoreSPUpdates) const {
+  // WinException uses this (with IgnoreSPUpdates) to emit the frame offset of a
+  // catch object into the C++ EH tables. It expects an offset expressed against
+  // the stack pointer / establisher frame, not the frame pointer, and asserts
+  // FrameReg is SP. On RISC-V the frame pointer equals the CFA (incoming SP)
+  // and object offsets are stored relative to the CFA, so the raw object offset
+  // is exactly what the runtime adds to the establisher frame. Mirrors AArch64.
+  if (IgnoreSPUpdates) {
+    const MachineFrameInfo &MFI = MF.getFrameInfo();
+    FrameReg = SPReg;
+    return StackOffset::getFixed(MFI.getObjectOffset(FI) +
+                                 MFI.getOffsetAdjustment());
+  }
+  return getFrameIndexReference(MF, FI, FrameReg);
 }
 
 StackOffset
@@ -1853,6 +2106,74 @@ void RISCVFrameLowering::processFunctionBeforeFrameFinalized(
     Size += MFI.getObjectSize(FrameIdx);
   }
   RVFI->setCalleeSavedStackSize(Size);
+
+  emitWinEHFixedObjects(MF, RS);
+}
+
+// Reserve the fixed stack objects Windows funclet-based C++ EH needs: one slot
+// per catch object (where the personality copies the caught exception) and a
+// single 8-byte UnwindHelp slot (where the personality records the current EH
+// state so nested throws unwind correctly). Both live just below the CFA, at
+// negative offsets from the establisher frame (== s0, see emitPrologue), and
+// those offsets are what WinException writes into the $cppxdata handler map.
+// Mirrors AArch64FrameLowering::processFunctionBeforeFrameFinalized. Only C++
+// (synchronous) EH needs this; SEH (__try/__except) reaches parent state
+// through its own scope table and llvm.localrecover, so leave it untouched.
+void RISCVFrameLowering::emitWinEHFixedObjects(MachineFunction &MF,
+                                               RegScavenger *RS) const {
+  if (!MF.hasEHFunclets() || !MF.getFunction().hasPersonalityFn() ||
+      isAsynchronousEHPersonality(
+          classifyEHPersonality(MF.getFunction().getPersonalityFn())))
+    return;
+
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  WinEHFuncInfo &EHInfo = *MF.getWinEHFuncInfo();
+  const RISCVInstrInfo *TII = STI.getInstrInfo();
+  auto *RVFI = MF.getInfo<RISCVMachineFunctionInfo>();
+
+  // Catch objects sit below any incoming vararg save area, growing downward from
+  // the CFA. FunctionLoweringInfo created each one as a fixed object with a
+  // placeholder offset of 0 (see needsFixedCatchObjects); give each a real
+  // negative offset here.
+  int64_t CurrentOffset = RVFI->getVarArgsSaveSize();
+  for (WinEHTryBlockMapEntry &TBME : EHInfo.TryBlockMap) {
+    for (WinEHHandlerType &H : TBME.HandlerArray) {
+      int FrameIndex = H.CatchObj.FrameIndex;
+      if (FrameIndex != INT_MAX && MFI.getObjectOffset(FrameIndex) == 0) {
+        CurrentOffset =
+            alignTo(CurrentOffset, MFI.getObjectAlign(FrameIndex).value());
+        CurrentOffset += MFI.getObjectSize(FrameIndex);
+        MFI.setObjectOffset(FrameIndex, -CurrentOffset);
+      }
+    }
+  }
+
+  // The 8-byte UnwindHelp slot follows the catch objects, 16-byte aligned.
+  CurrentOffset = alignTo(CurrentOffset + 8, Align(16));
+  int UnwindHelpFI =
+      MFI.CreateFixedObject(/*Size=*/8, -CurrentOffset, /*IsImmutable=*/false);
+  EHInfo.UnwindHelpFrameIdx = UnwindHelpFI;
+
+  // The entry prologue must initialize UnwindHelp to -2 (the "no active state"
+  // sentinel the __CxxFrameHandler runtime expects before any try region is
+  // entered). Insert the store after the callee-saved spills; emitPrologue's
+  // remaining frame setup is threaded in ahead of it, so it runs once s0 is
+  // established.
+  MachineBasicBlock &MBB = MF.front();
+  MachineBasicBlock::iterator MBBI = MBB.begin();
+  while (MBBI != MBB.end() && MBBI->getFlag(MachineInstr::FrameSetup))
+    ++MBBI;
+
+  DebugLoc DL;
+  RS->enterBasicBlockEnd(MBB);
+  RS->backward(MBBI);
+  Register ScratchReg = RS->FindUnusedReg(&RISCV::GPRRegClass);
+  assert(ScratchReg && "There must be a free register after frame setup");
+  TII->movImm(MBB, MBBI, DL, ScratchReg, -2);
+  BuildMI(MBB, MBBI, DL, TII->get(RISCV::SD))
+      .addReg(ScratchReg, RegState::Kill)
+      .addFrameIndex(UnwindHelpFI)
+      .addImm(0);
 }
 
 // Not preserve stack space within prologue for outgoing variables when the

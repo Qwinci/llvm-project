@@ -147,3 +147,31 @@ define ptr @test_returnaddress_2() nounwind {
   %1 = call ptr @llvm.returnaddress(i32 2)
   ret ptr %1
 }
+
+define ptr @test_addressofreturnaddress() nounwind {
+; RV32I-LABEL: test_addressofreturnaddress:
+; RV32I:       # %bb.0:
+; RV32I-NEXT:    addi sp, sp, -16
+; RV32I-NEXT:    sw ra, 12(sp) # 4-byte Folded Spill
+; RV32I-NEXT:    sw s0, 8(sp) # 4-byte Folded Spill
+; RV32I-NEXT:    addi s0, sp, 16
+; RV32I-NEXT:    addi a0, s0, -4
+; RV32I-NEXT:    lw ra, 12(sp) # 4-byte Folded Reload
+; RV32I-NEXT:    lw s0, 8(sp) # 4-byte Folded Reload
+; RV32I-NEXT:    addi sp, sp, 16
+; RV32I-NEXT:    ret
+;
+; RV64I-LABEL: test_addressofreturnaddress:
+; RV64I:       # %bb.0:
+; RV64I-NEXT:    addi sp, sp, -16
+; RV64I-NEXT:    sd ra, 8(sp) # 8-byte Folded Spill
+; RV64I-NEXT:    sd s0, 0(sp) # 8-byte Folded Spill
+; RV64I-NEXT:    addi s0, sp, 16
+; RV64I-NEXT:    addi a0, s0, -8
+; RV64I-NEXT:    ld ra, 8(sp) # 8-byte Folded Reload
+; RV64I-NEXT:    ld s0, 0(sp) # 8-byte Folded Reload
+; RV64I-NEXT:    addi sp, sp, 16
+; RV64I-NEXT:    ret
+  %1 = call ptr @llvm.addressofreturnaddress()
+  ret ptr %1
+}

@@ -13,6 +13,7 @@
 #ifndef LLVM_LIB_TARGET_RISCV_MCTARGETDESC_RISCVMCASMINFO_H
 #define LLVM_LIB_TARGET_RISCV_MCTARGETDESC_RISCVMCASMINFO_H
 
+#include "llvm/MC/MCAsmInfoCOFF.h"
 #include "llvm/MC/MCAsmInfoDarwin.h"
 #include "llvm/MC/MCAsmInfoELF.h"
 #include "llvm/MC/MCFixup.h"
@@ -45,6 +46,9 @@ enum {
   // Vendor-specific relocation types might conflict across vendors.
   // Refer to them using Specifier constants.
   S_QC_ABS20,
+  // Windows TLS. COFF-only, so there is no ELF relocation number to reuse.
+  S_TLS_SECREL_HI,
+  S_TLS_SECREL_LO,
 };
 
 Specifier parseSpecifierName(StringRef name);
@@ -54,6 +58,20 @@ StringRef getSpecifierName(Specifier Kind);
 class RISCVMCAsmInfoDarwin : public MCAsmInfoDarwin {
 public:
   explicit RISCVMCAsmInfoDarwin();
+};
+
+class RISCVMCAsmInfoMicrosoftCOFF : public MCAsmInfoMicrosoft {
+public:
+  explicit RISCVMCAsmInfoMicrosoftCOFF();
+  void printSpecifierExpr(raw_ostream &OS,
+                          const MCSpecifierExpr &Expr) const override;
+};
+
+class RISCVMCAsmInfoGNUCOFF : public MCAsmInfoGNUCOFF {
+public:
+  explicit RISCVMCAsmInfoGNUCOFF();
+  void printSpecifierExpr(raw_ostream &OS,
+                          const MCSpecifierExpr &Expr) const override;
 };
 
 } // namespace llvm

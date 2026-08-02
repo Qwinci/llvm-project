@@ -107,6 +107,21 @@ enum UnwindOpcodes {
   // Using UOP_End from above
   UOP_EndNop,
   UOP_WideEndNop,
+
+  // RISCV64 reuses the x86_64 UNWIND_INFO container and 2-byte UnwindCode
+  // slots unchanged: RISC-V epilogues mirror their prologues, so there is no
+  // need for ARM64-style epilogue opcodes. UOP_AllocSmall/UOP_AllocLarge/
+  // UOP_SetFPReg are pure SP/FP bookkeeping and are reused as-is, and
+  // UOP_SaveNonVol already has the 4-bit register field and 8-byte-scaled
+  // offset a GPR save needs (with RISC-V's own register numbering, see
+  // RISCVWinCOFFStreamer.cpp). Only an FPR save needs a new opcode, because
+  // UOP_SaveXMM128 assumes 16-byte registers rather than 8. The full format is
+  // documented in llvm/docs/RISCVWinCFI.md. RISCV64 additionally reuses the
+  // ARM64 UOP_TrapFrame/UOP_Context/UOP_ClearUnwoundToCall entries above for
+  // hand-written OS runtime stubs (remapped into its own dense on-disk nibble
+  // range; see riscv64OnDiskOp in MCWin64EH.cpp).
+  UOP_RISCVSaveFReg, // Save one FPR (fs0-fs11) at [sp+offset]
+
   // A custom unspecified opcode, consisting of one or more bytes. This
   // allows producing opcodes in the implementation defined/reserved range.
   UOP_Custom,

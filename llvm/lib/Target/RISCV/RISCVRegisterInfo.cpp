@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "RISCVRegisterInfo.h"
+#include "MCTargetDesc/RISCVMCTargetDesc.h"
 #include "RISCV.h"
 #include "RISCVSubtarget.h"
 #include "llvm/ADT/SmallSet.h"
@@ -55,8 +56,10 @@ static_assert(RISCV::V1 == RISCV::V0 + 1, "Register list not consecutive");
 static_assert(RISCV::V31 == RISCV::V0 + 31, "Register list not consecutive");
 
 RISCVRegisterInfo::RISCVRegisterInfo(unsigned HwMode)
-    : RISCVGenRegisterInfo(RISCV::X1, /*DwarfFlavour*/0, /*EHFlavor*/0,
-                           /*PC*/0, HwMode) {}
+    : RISCVGenRegisterInfo(RISCV::X1, /*DwarfFlavour*/ 0, /*EHFlavor*/ 0,
+                           /*PC*/ 0, HwMode) {
+  RISCV_MC::initLLVMToCVRegMapping(this);
+}
 
 const MCPhysReg *
 RISCVRegisterInfo::getIPRACSRegs(const MachineFunction *MF) const {
@@ -514,6 +517,19 @@ bool RISCVRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   DebugLoc DL = MI.getDebugLoc();
 
   int FrameIndex = MI.getOperand(FIOperandNum).getIndex();
+
+  if (MI.getOpcode() == TargetOpcode::LOCAL_ESCAPE) {
+    // LOCAL_ESCAPE (from llvm.localescape) has no separate immediate operand
+    // to fold the offset into, so the frame-index operand itself becomes the
+    // offset. Mirrors AArch64RegisterInfo.
+    MachineOperand &FI = MI.getOperand(FIOperandNum);
+    StackOffset Offset =
+        getFrameLowering(MF)->getNonLocalFrameIndexReference(MF, FrameIndex);
+    assert(!Offset.getScalable() &&
+           "Frame offsets with a scalable component are not supported");
+    FI.ChangeToImmediate(Offset.getFixed());
+    return false;
+  }
   Register FrameReg;
   StackOffset Offset =
       getFrameLowering(MF)->getFrameIndexReference(MF, FrameIndex, FrameReg);

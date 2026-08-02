@@ -60,6 +60,9 @@ public:
   RISCVMachOTargetObjectFile() {};
 };
 
+/// This implementation is used for RISCV64 Windows COFF targets.
+class RISCVCOFFTargetObjectFile : public TargetLoweringObjectFileCOFF {};
+
 } // end namespace llvm
 
 #endif

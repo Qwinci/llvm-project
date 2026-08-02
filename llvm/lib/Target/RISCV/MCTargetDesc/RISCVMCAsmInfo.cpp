@@ -48,15 +48,24 @@ const MCExpr *RISCVMCAsmInfo::getExprForFDESymbol(const MCSymbol *Sym,
   return MCSpecifierExpr::create(ME, ELF::R_RISCV_32_PCREL, Ctx);
 }
 
-void RISCVMCAsmInfo::printSpecifierExpr(raw_ostream &OS,
-                                        const MCSpecifierExpr &Expr) const {
+// Shared by every RISCVMCAsmInfo* variant (ELF, Microsoft COFF, GNU COFF):
+// the specifier space (RISCV::Specifier) and its `%name(...)` print syntax
+// are object-format-independent, unlike the AtSpecifier ("@IMGREL"-style)
+// mechanism used elsewhere for genuinely COFF-specific syntax.
+static void printRISCVSpecifierExpr(const MCAsmInfo &MAI, raw_ostream &OS,
+                                    const MCSpecifierExpr &Expr) {
   auto S = Expr.getSpecifier();
   bool HasSpecifier = S != 0 && S != ELF::R_RISCV_CALL_PLT;
   if (HasSpecifier)
     OS << '%' << RISCV::getSpecifierName(S) << '(';
-  printExpr(OS, *Expr.getSubExpr());
+  MAI.printExpr(OS, *Expr.getSubExpr());
   if (HasSpecifier)
     OS << ')';
+}
+
+void RISCVMCAsmInfo::printSpecifierExpr(raw_ostream &OS,
+                                        const MCSpecifierExpr &Expr) const {
+  printRISCVSpecifierExpr(*this, OS, Expr);
 }
 
 RISCVMCAsmInfoDarwin::RISCVMCAsmInfoDarwin() {
@@ -70,4 +79,49 @@ RISCVMCAsmInfoDarwin::RISCVMCAsmInfoDarwin() {
   ExceptionsType = ExceptionHandling::DwarfCFI;
   Data16bitsDirective = "\t.half\t";
   Data32bitsDirective = "\t.word\t";
+}
+
+// This provides `@IMGREL` parsing/printing support for COFF data directives
+// (e.g. `.long sym@IMGREL`), independent of the `%pcrel_hi(...)`-style
+// specifier syntax used elsewhere.
+static const MCAsmInfo::AtSpecifier RISCVCOFFAtSpecifiers[] = {
+    {MCSymbolRefExpr::VK_COFF_IMGREL32, "IMGREL"},
+};
+
+RISCVMCAsmInfoMicrosoftCOFF::RISCVMCAsmInfoMicrosoftCOFF() {
+  CodePointerSize = CalleeSaveStackSlotSize = 8;
+  PrivateGlobalPrefix = ".L";
+  PrivateLabelPrefix = ".L";
+  CommentString = "#";
+  AlignmentIsInBytes = false;
+  SupportsDebugInformation = true;
+  Data16bitsDirective = "\t.half\t";
+  Data32bitsDirective = "\t.word\t";
+  ExceptionsType = ExceptionHandling::WinEH;
+  WinEHEncodingType = WinEH::EncodingType::Itanium;
+  initializeAtSpecifiers(RISCVCOFFAtSpecifiers);
+}
+
+void RISCVMCAsmInfoMicrosoftCOFF::printSpecifierExpr(
+    raw_ostream &OS, const MCSpecifierExpr &Expr) const {
+  printRISCVSpecifierExpr(*this, OS, Expr);
+}
+
+RISCVMCAsmInfoGNUCOFF::RISCVMCAsmInfoGNUCOFF() {
+  CodePointerSize = CalleeSaveStackSlotSize = 8;
+  PrivateGlobalPrefix = ".L";
+  PrivateLabelPrefix = ".L";
+  CommentString = "#";
+  AlignmentIsInBytes = false;
+  SupportsDebugInformation = true;
+  Data16bitsDirective = "\t.half\t";
+  Data32bitsDirective = "\t.word\t";
+  ExceptionsType = ExceptionHandling::WinEH;
+  WinEHEncodingType = WinEH::EncodingType::Itanium;
+  initializeAtSpecifiers(RISCVCOFFAtSpecifiers);
+}
+
+void RISCVMCAsmInfoGNUCOFF::printSpecifierExpr(
+    raw_ostream &OS, const MCSpecifierExpr &Expr) const {
+  printRISCVSpecifierExpr(*this, OS, Expr);
 }

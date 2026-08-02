@@ -125,6 +125,70 @@ MCRegister getSCSPReg() { return RISCV::X3; }
 
 } // namespace RISCVABI
 
+int getSEHGPRIndex(MCRegister Reg) {
+  switch (Reg) {
+  case RISCV::X1:
+    return 0; // ra
+  case RISCV::X8:
+    return 1; // s0
+  case RISCV::X9:
+    return 2; // s1
+  case RISCV::X18:
+    return 3; // s2
+  case RISCV::X19:
+    return 4; // s3
+  case RISCV::X20:
+    return 5; // s4
+  case RISCV::X21:
+    return 6; // s5
+  case RISCV::X22:
+    return 7; // s6
+  case RISCV::X23:
+    return 8; // s7
+  case RISCV::X24:
+    return 9; // s8
+  case RISCV::X25:
+    return 10; // s9
+  case RISCV::X26:
+    return 11; // s10
+  case RISCV::X27:
+    return 12; // s11
+  default:
+    return -1;
+  }
+}
+
+int getSEHFPRIndex(MCRegister Reg) {
+  switch (Reg) {
+  case RISCV::F8_D:
+    return 0; // fs0
+  case RISCV::F9_D:
+    return 1; // fs1
+  case RISCV::F18_D:
+    return 2; // fs2
+  case RISCV::F19_D:
+    return 3; // fs3
+  case RISCV::F20_D:
+    return 4; // fs4
+  case RISCV::F21_D:
+    return 5; // fs5
+  case RISCV::F22_D:
+    return 6; // fs6
+  case RISCV::F23_D:
+    return 7; // fs7
+  case RISCV::F24_D:
+    return 8; // fs8
+  case RISCV::F25_D:
+    return 9; // fs9
+  case RISCV::F26_D:
+    return 10; // fs10
+  case RISCV::F27_D:
+    return 11; // fs11
+  default:
+    return -1;
+  }
+}
+
 namespace RISCVFeatures {
 
 void validate(const Triple &TT, const FeatureBitset &FeatureBits) {

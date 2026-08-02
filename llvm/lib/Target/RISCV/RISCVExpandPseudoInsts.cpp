@@ -731,8 +731,15 @@ bool RISCVPreRAExpandPseudo::expandLoadGlobalAddress(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
     MachineBasicBlock::iterator &NextMBBI) {
   unsigned SecondOpcode = STI->is64Bit() ? RISCV::LD : RISCV::LW;
-  return expandAuipcInstPair(MBB, MBBI, NextMBBI, RISCVII::MO_GOT_HI,
-                             SecondOpcode);
+  // On COFF there is no GOT: a non-local global is loaded through a
+  // .refptr.<sym>/__imp_<sym> stub addressed with an ordinary %pcrel_hi,
+  // carrying the stub bit (MO_COFFSTUB/MO_DLLIMPORT) alongside so the asm
+  // printer redirects the symbol. Everything else uses %got_pcrel_hi.
+  unsigned StubFlag = MBBI->getOperand(1).getTargetFlags() &
+                      (RISCVII::MO_COFFSTUB | RISCVII::MO_DLLIMPORT);
+  unsigned FlagsHi =
+      StubFlag ? (RISCVII::MO_PCREL_HI | StubFlag) : RISCVII::MO_GOT_HI;
+  return expandAuipcInstPair(MBB, MBBI, NextMBBI, FlagsHi, SecondOpcode);
 }
 
 bool RISCVPreRAExpandPseudo::expandLoadTLSIEAddress(

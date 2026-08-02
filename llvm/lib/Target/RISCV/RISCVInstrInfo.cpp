@@ -31,6 +31,7 @@
 #include "llvm/CodeGen/StackMaps.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/Module.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCInstBuilder.h"
 #include "llvm/MC/TargetRegistry.h"
@@ -83,7 +84,7 @@ namespace llvm::RISCV {
 
 RISCVInstrInfo::RISCVInstrInfo(const RISCVSubtarget &STI)
     : RISCVGenInstrInfo(STI, RegInfo, RISCV::ADJCALLSTACKDOWN,
-                        RISCV::ADJCALLSTACKUP),
+                        RISCV::ADJCALLSTACKUP, RISCV::CATCHRET),
       RegInfo(STI.getHwMode()), STI(STI) {}
 
 #define GET_INSTRINFO_HELPERS
@@ -2073,6 +2074,45 @@ unsigned RISCVInstrInfo::getInstBundleLength(const MachineInstr &MI) const {
   return Size;
 }
 
+bool RISCVInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
+  // A catchret returns from a Windows C++ catch funclet to the continuation
+  // point in the parent function. The personality routine resumes execution at
+  // the address the funclet leaves in a0, so materialize the target block's
+  // address there. The `ret` itself is emitted later, in RISCVAsmPrinter.
+  //
+  // Place the auipc/addi pair before the funclet epilogue (the run of
+  // FrameDestroy-flagged restores preceding the terminator) so the epilogue
+  // stays a contiguous sequence for Windows SEH unwind-info generation, exactly
+  // as AArch64 does for its CATCHRET pseudo.
+  if (MI.getOpcode() != RISCV::CATCHRET)
+    return false;
+
+  MachineBasicBlock &MBB = *MI.getParent();
+  MachineFunction &MF = *MBB.getParent();
+  DebugLoc DL = MI.getDebugLoc();
+  MachineBasicBlock *TargetMBB = MI.getOperand(0).getMBB();
+
+  MachineBasicBlock::iterator FirstEpilogInsn = MI;
+  while (FirstEpilogInsn != MBB.begin() &&
+         std::prev(FirstEpilogInsn)->getFlag(MachineInstr::FrameDestroy))
+    --FirstEpilogInsn;
+
+  MCSymbol *AUIPCSymbol = MF.getContext().createNamedTempSymbol("pcrel_hi");
+  BuildMI(MBB, FirstEpilogInsn, DL, get(RISCV::AUIPC), RISCV::X10)
+      .addMBB(TargetMBB, RISCVII::MO_PCREL_HI)
+      ->setPreInstrSymbol(MF, AUIPCSymbol);
+  BuildMI(MBB, FirstEpilogInsn, DL, get(RISCV::ADDI), RISCV::X10)
+      .addReg(RISCV::X10)
+      .addSym(AUIPCSymbol, RISCVII::MO_PCREL_LO);
+
+  // Force a label to be emitted for the continuation block so the %pcrel_hi/
+  // %pcrel_lo pair above has something to reference.
+  TargetMBB->setMachineBlockAddressTaken();
+
+  // Leave the CATCHRET in place; RISCVAsmPrinter lowers it to `ret`.
+  return true;
+}
+
 bool RISCVInstrInfo::isAsCheapAsAMove(const MachineInstr &MI) const {
   const unsigned Opcode = MI.getOpcode();
   switch (Opcode) {
@@ -3577,6 +3617,14 @@ RISCVInstrInfo::getSerializableDirectMachineOperandTargetFlags() const {
       {MO_TLSDESC_LOAD_LO, "riscv-tlsdesc-load-lo"},
       {MO_TLSDESC_ADD_LO, "riscv-tlsdesc-add-lo"},
       {MO_TLSDESC_CALL, "riscv-tlsdesc-call"}};
+  return ArrayRef(TargetFlags);
+}
+ArrayRef<std::pair<unsigned, const char *>>
+RISCVInstrInfo::getSerializableBitmaskMachineOperandTargetFlags() const {
+  using namespace RISCVII;
+  static const std::pair<unsigned, const char *> TargetFlags[] = {
+      {MO_COFFSTUB, "riscv-coffstub"},
+      {MO_DLLIMPORT, "riscv-dllimport"}};
   return ArrayRef(TargetFlags);
 }
 bool RISCVInstrInfo::isFunctionSafeToOutlineFrom(

@@ -24,12 +24,13 @@ namespace COFF {
 enum MachineTypes : unsigned;
 }
 
-// Returns a user-readable string for ARMNT, ARM64, AMD64, I386.
+// Returns a user-readable string for ARMNT, ARM64, AMD64, I386, RISCV64.
 // Other MachineTypes values must not be passed in.
 LLVM_ABI StringRef machineToStr(COFF::MachineTypes MT);
 
 // Maps /machine: arguments to a MachineTypes value.
-// Only returns ARMNT, ARM64, AMD64, I386, or IMAGE_FILE_MACHINE_UNKNOWN.
+// Only returns ARMNT, ARM64, AMD64, I386, RISCV64, or
+// IMAGE_FILE_MACHINE_UNKNOWN.
 LLVM_ABI COFF::MachineTypes getMachineType(StringRef S);
 
 template <typename T> Triple::ArchType getMachineArchType(T machine) {
@@ -46,6 +47,8 @@ template <typename T> Triple::ArchType getMachineArchType(T machine) {
     return llvm::Triple::ArchType::aarch64;
   case COFF::IMAGE_FILE_MACHINE_R4000:
     return llvm::Triple::ArchType::mipsel;
+  case COFF::IMAGE_FILE_MACHINE_RISCV64:
+    return llvm::Triple::ArchType::riscv64;
   default:
     return llvm::Triple::ArchType::UnknownArch;
   }

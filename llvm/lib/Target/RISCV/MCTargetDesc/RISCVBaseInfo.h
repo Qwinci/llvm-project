@@ -352,11 +352,22 @@ enum {
   MO_TLSDESC_LOAD_LO = 14,
   MO_TLSDESC_ADD_LO = 15,
   MO_TLSDESC_CALL = 16,
+  // Windows TLS, see RISCVISelLowering's lowerWindowsGlobalTLSAddress.
+  MO_TLS_SECREL_HI = 17,
+  MO_TLS_SECREL_LO = 18,
 
   // Used to differentiate between target-specific "direct" flags and "bitmask"
   // flags. A machine operand can only have one "direct" flag, but can have
   // multiple "bitmask" flags.
-  MO_DIRECT_FLAG_MASK = 31
+  MO_DIRECT_FLAG_MASK = 31,
+
+  // Bitmask flags. Combined with a direct flag (MO_PCREL_HI) on a COFF/Windows
+  // global reference to route it through an indirection that the loader or
+  // mingw auto-import can resolve, since COFF has no GOT and the split
+  // %pcrel_hi/%pcrel_lo pair cannot itself be relocated at load time. Only one
+  // of these is ever set at a time. See RISCVISelLowering::lowerGlobalAddress.
+  MO_COFFSTUB = 0x20,  // Reference a local .refptr.<sym> pointer.
+  MO_DLLIMPORT = 0x40, // Reference __imp_<sym> from the import address table.
 };
 } // namespace RISCVII
 
@@ -675,6 +686,13 @@ MCRegister getBPReg();
 MCRegister getSCSPReg();
 
 } // namespace RISCVABI
+
+// Map the callee-saved GPRs (ra, s0-s11) and FPRs (fs0-fs11) to the compact
+// register index used by the Windows SEH xdata unwind codes (see
+// llvm/docs/RISCVWinCFI.md). Returns -1 for a register that cannot appear in a
+// Windows SEH prologue.
+int getSEHGPRIndex(MCRegister Reg);
+int getSEHFPRIndex(MCRegister Reg);
 
 namespace RISCVFeatures {
 

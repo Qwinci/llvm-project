@@ -48,6 +48,8 @@ LLVM and API reference documentation.
    MemoryModelRelaxationAnnotations
    MemTagSanitizer
    QualGroup
+   RISCVWinCFI
+   RISCVWinCppEH
    Security
    SecurityTransparencyReports
    SegmentedStacks
@@ -187,6 +189,13 @@ Additional Topics
 
 :doc:`Extensions`
   LLVM-specific extensions to tools and formats LLVM seeks compatibility with.
+
+:doc:`RISCVWinCFI`
+  LLVM's SEH unwind info format for RISCV64 Windows (COFF/PE) targets.
+
+:doc:`RISCVWinCppEH`
+  LLVM's C++ exception handling ABI (``__CxxFrameHandler3`` contract) for RISCV64
+  Windows (COFF/PE) targets.
 
 :doc:`HowToSetUpLLVMStyleRTTI`
   How to make ``isa<>``, ``dyn_cast<>``, etc. available for clients of your

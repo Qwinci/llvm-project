@@ -55,6 +55,14 @@ static const EnumEntry<uint16_t> RegisterNames_ARM64[] = {
 #undef CV_REGISTERS_ARM64
 };
 
+static const EnumEntry<uint16_t> RegisterNames_RISCV64[] = {
+#define CV_REGISTERS_RISCV64
+#define CV_REGISTER(name, val) CV_ENUM_CLASS_ENT(RegisterId, name),
+#include "llvm/DebugInfo/CodeView/CodeViewRegisters.def"
+#undef CV_REGISTER
+#undef CV_REGISTERS_RISCV64
+};
+
 static const EnumEntry<uint32_t> PublicSymFlagNames[] = {
     CV_ENUM_CLASS_ENT(PublicSymFlags, Code),
     CV_ENUM_CLASS_ENT(PublicSymFlags, Function),
@@ -207,6 +215,7 @@ static const EnumEntry<unsigned> CPUTypeNames[] = {
     CV_ENUM_CLASS_ENT(CPUType, HybridX86ARM64),
     CV_ENUM_CLASS_ENT(CPUType, ARM64EC),
     CV_ENUM_CLASS_ENT(CPUType, ARM64X),
+    CV_ENUM_CLASS_ENT(CPUType, RISCV64),
     CV_ENUM_CLASS_ENT(CPUType, Unknown),
     CV_ENUM_CLASS_ENT(CPUType, D3D11_Shader),
 };
@@ -468,6 +477,8 @@ ArrayRef<EnumEntry<uint16_t>> getRegisterNames(CPUType Cpu) {
     return ArrayRef(RegisterNames_ARM);
   } else if (Cpu == CPUType::ARM64) {
     return ArrayRef(RegisterNames_ARM64);
+  } else if (Cpu == CPUType::RISCV64) {
+    return ArrayRef(RegisterNames_RISCV64);
   }
   return ArrayRef(RegisterNames_X86);
 }

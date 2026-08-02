@@ -12,6 +12,8 @@ add_llvm_component_library(LLVMRISCVDesc
   RISCVMatInt.cpp
   RISCVTargetStreamer.cpp
   RISCVELFStreamer.cpp
+  RISCVWinCOFFObjectWriter.cpp
+  RISCVWinCOFFStreamer.cpp
 
   LINK_COMPONENTS
   BinaryFormat

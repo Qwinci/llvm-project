@@ -48,6 +48,10 @@ struct Instruction {
   static WinEH::Instruction SetFPReg(MCSymbol *L, unsigned Reg, unsigned Off) {
     return WinEH::Instruction(UOP_SetFPReg, L, Reg, Off);
   }
+  static WinEH::Instruction RISCVSaveFReg(MCSymbol *L, unsigned Reg,
+                                          unsigned Offset) {
+    return WinEH::Instruction(UOP_RISCVSaveFReg, L, Reg, Offset);
+  }
 };
 
 class UnwindEmitter : public WinEH::UnwindEmitter {
@@ -65,6 +69,14 @@ public:
 };
 
 class ARM64UnwindEmitter : public WinEH::UnwindEmitter {
+public:
+  void Emit(MCStreamer &Streamer) const override;
+  void EmitUnwindInfo(MCStreamer &Streamer, WinEH::FrameInfo *FI,
+                      bool HandlerData) const override;
+};
+
+// Emits the RISCV64 unwind format described in llvm/docs/RISCVWinCFI.md.
+class RISCV64UnwindEmitter : public WinEH::UnwindEmitter {
 public:
   void Emit(MCStreamer &Streamer) const override;
   void EmitUnwindInfo(MCStreamer &Streamer, WinEH::FrameInfo *FI,

@@ -155,6 +155,13 @@ bool RISCVMergeBaseOffsetOpt::foldOffset(MachineInstr &Hi, MachineInstr &Lo,
   // the global object. The object may be within 2GB of the PC, but addresses
   // outside of the object might not be.
   auto HiOpc = Hi.getOpcode();
+  // COFF has no relocation addend field, so a %pcrel_hi carries the byte addend
+  // in the auipc's 20-bit immediate for lld (see RISCVAsmBackend::applyFixup).
+  // An offset that does not fit in a signed 20-bit value cannot be carried
+  // there, so leave it as a separate add rather than folding it into the pair.
+  if (HiOpc == RISCV::AUIPC && ST->getTargetTriple().isOSBinFormatCOFF() &&
+      !isInt<20>(Offset))
+    return false;
   if (HiOpc == RISCV::AUIPC && Hi.getOperand(1).isGlobal()) {
     const GlobalValue *GV = Hi.getOperand(1).getGlobal();
     Type *Ty = GV->getValueType();
