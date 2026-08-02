@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "CGBuiltin.h"
 #include "CodeGenFunction.h"
 #include "clang/Basic/TargetBuiltins.h"
 #include "llvm/IR/IntrinsicsRISCV.h"
@@ -1070,6 +1071,165 @@ Value *CodeGenFunction::EmitRISCVCpuIs(StringRef CPUStr) {
   return Result;
 }
 
+static std::optional<CodeGenFunction::MSVCIntrin>
+translateRISCVToMsvcIntrin(unsigned BuiltinID) {
+  using MSVCIntrin = CodeGenFunction::MSVCIntrin;
+  switch (BuiltinID) {
+  default:
+    return std::nullopt;
+  case clang::RISCV::BI_BitScanForward:
+  case clang::RISCV::BI_BitScanForward64:
+    return MSVCIntrin::_BitScanForward;
+  case clang::RISCV::BI_BitScanReverse:
+  case clang::RISCV::BI_BitScanReverse64:
+    return MSVCIntrin::_BitScanReverse;
+  case clang::RISCV::BI_InterlockedAnd64:
+    return MSVCIntrin::_InterlockedAnd;
+  case clang::RISCV::BI_InterlockedExchange64:
+    return MSVCIntrin::_InterlockedExchange;
+  case clang::RISCV::BI_InterlockedExchangeAdd64:
+    return MSVCIntrin::_InterlockedExchangeAdd;
+  case clang::RISCV::BI_InterlockedExchangeSub64:
+    return MSVCIntrin::_InterlockedExchangeSub;
+  case clang::RISCV::BI_InterlockedOr64:
+    return MSVCIntrin::_InterlockedOr;
+  case clang::RISCV::BI_InterlockedXor64:
+    return MSVCIntrin::_InterlockedXor;
+  case clang::RISCV::BI_InterlockedDecrement64:
+    return MSVCIntrin::_InterlockedDecrement;
+  case clang::RISCV::BI_InterlockedIncrement64:
+    return MSVCIntrin::_InterlockedIncrement;
+  case clang::RISCV::BI_InterlockedExchangeAdd8_acq:
+  case clang::RISCV::BI_InterlockedExchangeAdd16_acq:
+  case clang::RISCV::BI_InterlockedExchangeAdd_acq:
+  case clang::RISCV::BI_InterlockedExchangeAdd64_acq:
+    return MSVCIntrin::_InterlockedExchangeAdd_acq;
+  case clang::RISCV::BI_InterlockedExchangeAdd8_rel:
+  case clang::RISCV::BI_InterlockedExchangeAdd16_rel:
+  case clang::RISCV::BI_InterlockedExchangeAdd_rel:
+  case clang::RISCV::BI_InterlockedExchangeAdd64_rel:
+    return MSVCIntrin::_InterlockedExchangeAdd_rel;
+  case clang::RISCV::BI_InterlockedExchangeAdd8_nf:
+  case clang::RISCV::BI_InterlockedExchangeAdd16_nf:
+  case clang::RISCV::BI_InterlockedExchangeAdd_nf:
+  case clang::RISCV::BI_InterlockedExchangeAdd64_nf:
+    return MSVCIntrin::_InterlockedExchangeAdd_nf;
+  case clang::RISCV::BI_InterlockedExchange8_acq:
+  case clang::RISCV::BI_InterlockedExchange16_acq:
+  case clang::RISCV::BI_InterlockedExchange_acq:
+  case clang::RISCV::BI_InterlockedExchange64_acq:
+  case clang::RISCV::BI_InterlockedExchangePointer_acq:
+    return MSVCIntrin::_InterlockedExchange_acq;
+  case clang::RISCV::BI_InterlockedExchange8_rel:
+  case clang::RISCV::BI_InterlockedExchange16_rel:
+  case clang::RISCV::BI_InterlockedExchange_rel:
+  case clang::RISCV::BI_InterlockedExchange64_rel:
+  case clang::RISCV::BI_InterlockedExchangePointer_rel:
+    return MSVCIntrin::_InterlockedExchange_rel;
+  case clang::RISCV::BI_InterlockedExchange8_nf:
+  case clang::RISCV::BI_InterlockedExchange16_nf:
+  case clang::RISCV::BI_InterlockedExchange_nf:
+  case clang::RISCV::BI_InterlockedExchange64_nf:
+  case clang::RISCV::BI_InterlockedExchangePointer_nf:
+    return MSVCIntrin::_InterlockedExchange_nf;
+  case clang::RISCV::BI_InterlockedCompareExchange8_acq:
+  case clang::RISCV::BI_InterlockedCompareExchange16_acq:
+  case clang::RISCV::BI_InterlockedCompareExchange_acq:
+  case clang::RISCV::BI_InterlockedCompareExchange64_acq:
+  case clang::RISCV::BI_InterlockedCompareExchangePointer_acq:
+    return MSVCIntrin::_InterlockedCompareExchange_acq;
+  case clang::RISCV::BI_InterlockedCompareExchange8_rel:
+  case clang::RISCV::BI_InterlockedCompareExchange16_rel:
+  case clang::RISCV::BI_InterlockedCompareExchange_rel:
+  case clang::RISCV::BI_InterlockedCompareExchange64_rel:
+  case clang::RISCV::BI_InterlockedCompareExchangePointer_rel:
+    return MSVCIntrin::_InterlockedCompareExchange_rel;
+  case clang::RISCV::BI_InterlockedCompareExchange8_nf:
+  case clang::RISCV::BI_InterlockedCompareExchange16_nf:
+  case clang::RISCV::BI_InterlockedCompareExchange_nf:
+  case clang::RISCV::BI_InterlockedCompareExchange64_nf:
+    return MSVCIntrin::_InterlockedCompareExchange_nf;
+  case clang::RISCV::BI_InterlockedCompareExchange128:
+    return MSVCIntrin::_InterlockedCompareExchange128;
+  case clang::RISCV::BI_InterlockedCompareExchange128_acq:
+    return MSVCIntrin::_InterlockedCompareExchange128_acq;
+  case clang::RISCV::BI_InterlockedCompareExchange128_nf:
+    return MSVCIntrin::_InterlockedCompareExchange128_nf;
+  case clang::RISCV::BI_InterlockedCompareExchange128_rel:
+    return MSVCIntrin::_InterlockedCompareExchange128_rel;
+  case clang::RISCV::BI_InterlockedOr8_acq:
+  case clang::RISCV::BI_InterlockedOr16_acq:
+  case clang::RISCV::BI_InterlockedOr_acq:
+  case clang::RISCV::BI_InterlockedOr64_acq:
+    return MSVCIntrin::_InterlockedOr_acq;
+  case clang::RISCV::BI_InterlockedOr8_rel:
+  case clang::RISCV::BI_InterlockedOr16_rel:
+  case clang::RISCV::BI_InterlockedOr_rel:
+  case clang::RISCV::BI_InterlockedOr64_rel:
+    return MSVCIntrin::_InterlockedOr_rel;
+  case clang::RISCV::BI_InterlockedOr8_nf:
+  case clang::RISCV::BI_InterlockedOr16_nf:
+  case clang::RISCV::BI_InterlockedOr_nf:
+  case clang::RISCV::BI_InterlockedOr64_nf:
+    return MSVCIntrin::_InterlockedOr_nf;
+  case clang::RISCV::BI_InterlockedXor8_acq:
+  case clang::RISCV::BI_InterlockedXor16_acq:
+  case clang::RISCV::BI_InterlockedXor_acq:
+  case clang::RISCV::BI_InterlockedXor64_acq:
+    return MSVCIntrin::_InterlockedXor_acq;
+  case clang::RISCV::BI_InterlockedXor8_rel:
+  case clang::RISCV::BI_InterlockedXor16_rel:
+  case clang::RISCV::BI_InterlockedXor_rel:
+  case clang::RISCV::BI_InterlockedXor64_rel:
+    return MSVCIntrin::_InterlockedXor_rel;
+  case clang::RISCV::BI_InterlockedXor8_nf:
+  case clang::RISCV::BI_InterlockedXor16_nf:
+  case clang::RISCV::BI_InterlockedXor_nf:
+  case clang::RISCV::BI_InterlockedXor64_nf:
+    return MSVCIntrin::_InterlockedXor_nf;
+  case clang::RISCV::BI_InterlockedAnd8_acq:
+  case clang::RISCV::BI_InterlockedAnd16_acq:
+  case clang::RISCV::BI_InterlockedAnd_acq:
+  case clang::RISCV::BI_InterlockedAnd64_acq:
+    return MSVCIntrin::_InterlockedAnd_acq;
+  case clang::RISCV::BI_InterlockedAnd8_rel:
+  case clang::RISCV::BI_InterlockedAnd16_rel:
+  case clang::RISCV::BI_InterlockedAnd_rel:
+  case clang::RISCV::BI_InterlockedAnd64_rel:
+    return MSVCIntrin::_InterlockedAnd_rel;
+  case clang::RISCV::BI_InterlockedAnd8_nf:
+  case clang::RISCV::BI_InterlockedAnd16_nf:
+  case clang::RISCV::BI_InterlockedAnd_nf:
+  case clang::RISCV::BI_InterlockedAnd64_nf:
+    return MSVCIntrin::_InterlockedAnd_nf;
+  case clang::RISCV::BI_InterlockedIncrement16_acq:
+  case clang::RISCV::BI_InterlockedIncrement_acq:
+  case clang::RISCV::BI_InterlockedIncrement64_acq:
+    return MSVCIntrin::_InterlockedIncrement_acq;
+  case clang::RISCV::BI_InterlockedIncrement16_rel:
+  case clang::RISCV::BI_InterlockedIncrement_rel:
+  case clang::RISCV::BI_InterlockedIncrement64_rel:
+    return MSVCIntrin::_InterlockedIncrement_rel;
+  case clang::RISCV::BI_InterlockedIncrement16_nf:
+  case clang::RISCV::BI_InterlockedIncrement_nf:
+  case clang::RISCV::BI_InterlockedIncrement64_nf:
+    return MSVCIntrin::_InterlockedIncrement_nf;
+  case clang::RISCV::BI_InterlockedDecrement16_acq:
+  case clang::RISCV::BI_InterlockedDecrement_acq:
+  case clang::RISCV::BI_InterlockedDecrement64_acq:
+    return MSVCIntrin::_InterlockedDecrement_acq;
+  case clang::RISCV::BI_InterlockedDecrement16_rel:
+  case clang::RISCV::BI_InterlockedDecrement_rel:
+  case clang::RISCV::BI_InterlockedDecrement64_rel:
+    return MSVCIntrin::_InterlockedDecrement_rel;
+  case clang::RISCV::BI_InterlockedDecrement16_nf:
+  case clang::RISCV::BI_InterlockedDecrement_nf:
+  case clang::RISCV::BI_InterlockedDecrement64_nf:
+    return MSVCIntrin::_InterlockedDecrement_nf;
+  }
+  llvm_unreachable("must return from switch");
+}
+
 Value *CodeGenFunction::EmitRISCVBuiltinExpr(unsigned BuiltinID,
                                              const CallExpr *E,
                                              ReturnValueSlot ReturnValue) {
@@ -1080,6 +1240,146 @@ Value *CodeGenFunction::EmitRISCVBuiltinExpr(unsigned BuiltinID,
     return EmitRISCVCpuInit();
   if (BuiltinID == Builtin::BI__builtin_cpu_is)
     return EmitRISCVCpuIs(E);
+
+  // _ReadWriteBarrier is a compiler-only barrier; emit a single-threaded
+  // sequentially-consistent fence, matching the AArch64 handling.
+  if (BuiltinID == RISCV::BI_ReadWriteBarrier)
+    return Builder.CreateFence(llvm::AtomicOrdering::SequentiallyConsistent,
+                               llvm::SyncScope::SingleThread);
+
+  // The following MSVC-compatible intrinsics lower to plain, target-neutral IR,
+  // mirroring the identical handling in EmitAArch64BuiltinExpr.
+  switch (BuiltinID) {
+  case RISCV::BI_InterlockedAdd:
+  case RISCV::BI_InterlockedAdd_acq:
+  case RISCV::BI_InterlockedAdd_rel:
+  case RISCV::BI_InterlockedAdd_nf:
+  case RISCV::BI_InterlockedAdd64:
+  case RISCV::BI_InterlockedAdd64_acq:
+  case RISCV::BI_InterlockedAdd64_rel:
+  case RISCV::BI_InterlockedAdd64_nf: {
+    Address DestAddr = CheckAtomicAlignment(*this, E);
+    Value *Val = EmitScalarExpr(E->getArg(1));
+    llvm::AtomicOrdering Ordering;
+    switch (BuiltinID) {
+    case RISCV::BI_InterlockedAdd:
+    case RISCV::BI_InterlockedAdd64:
+      Ordering = llvm::AtomicOrdering::SequentiallyConsistent;
+      break;
+    case RISCV::BI_InterlockedAdd_acq:
+    case RISCV::BI_InterlockedAdd64_acq:
+      Ordering = llvm::AtomicOrdering::Acquire;
+      break;
+    case RISCV::BI_InterlockedAdd_rel:
+    case RISCV::BI_InterlockedAdd64_rel:
+      Ordering = llvm::AtomicOrdering::Release;
+      break;
+    case RISCV::BI_InterlockedAdd_nf:
+    case RISCV::BI_InterlockedAdd64_nf:
+      Ordering = llvm::AtomicOrdering::Monotonic;
+      break;
+    default:
+      llvm_unreachable("missing builtin ID in switch!");
+    }
+    AtomicRMWInst *RMWI =
+        Builder.CreateAtomicRMW(AtomicRMWInst::Add, DestAddr, Val, Ordering);
+    return Builder.CreateAdd(RMWI, Val);
+  }
+
+  case RISCV::BI__mulh:
+  case RISCV::BI__umulh: {
+    llvm::Type *ResType = ConvertType(E->getType());
+    llvm::Type *Int128Ty = llvm::IntegerType::get(getLLVMContext(), 128);
+
+    bool IsSigned = BuiltinID == RISCV::BI__mulh;
+    Value *LHS =
+        Builder.CreateIntCast(EmitScalarExpr(E->getArg(0)), Int128Ty, IsSigned);
+    Value *RHS =
+        Builder.CreateIntCast(EmitScalarExpr(E->getArg(1)), Int128Ty, IsSigned);
+
+    Value *MulResult, *HigherBits;
+    if (IsSigned) {
+      MulResult = Builder.CreateNSWMul(LHS, RHS);
+      HigherBits = Builder.CreateAShr(MulResult, 64);
+    } else {
+      MulResult = Builder.CreateNUWMul(LHS, RHS);
+      HigherBits = Builder.CreateLShr(MulResult, 64);
+    }
+    return Builder.CreateIntCast(HigherBits, ResType, IsSigned);
+  }
+
+  case RISCV::BI_AddressOfReturnAddress: {
+    llvm::Function *F =
+        CGM.getIntrinsic(Intrinsic::addressofreturnaddress, AllocaInt8PtrTy);
+    return Builder.CreateCall(F);
+  }
+
+  case RISCV::BI_CopyDoubleFromInt64:
+  case RISCV::BI_CopyFloatFromInt32:
+  case RISCV::BI_CopyInt32FromFloat:
+  case RISCV::BI_CopyInt64FromDouble:
+    return Builder.CreateBitCast(EmitScalarExpr(E->getArg(0)),
+                                 ConvertType(E->getType()));
+
+  case RISCV::BI_CountLeadingOnes:
+  case RISCV::BI_CountLeadingOnes64:
+  case RISCV::BI_CountLeadingZeros:
+  case RISCV::BI_CountLeadingZeros64: {
+    Value *Arg = EmitScalarExpr(E->getArg(0));
+    llvm::Type *ArgType = Arg->getType();
+
+    if (BuiltinID == RISCV::BI_CountLeadingOnes ||
+        BuiltinID == RISCV::BI_CountLeadingOnes64)
+      Arg = Builder.CreateXor(Arg, Constant::getAllOnesValue(ArgType));
+
+    Function *F = CGM.getIntrinsic(Intrinsic::ctlz, ArgType);
+    Value *Result = Builder.CreateCall(F, {Arg, Builder.getInt1(false)});
+
+    if (BuiltinID == RISCV::BI_CountLeadingOnes64 ||
+        BuiltinID == RISCV::BI_CountLeadingZeros64)
+      Result = Builder.CreateTrunc(Result, Builder.getInt32Ty());
+    return Result;
+  }
+
+  case RISCV::BI_CountLeadingSigns:
+  case RISCV::BI_CountLeadingSigns64: {
+    // RISC-V has no dedicated count-leading-sign-bits instruction, so compute
+    // it generically: clz of the value with its sign bit stripped, minus one.
+    Value *Arg = EmitScalarExpr(E->getArg(0));
+    llvm::Type *ArgType = Arg->getType();
+
+    Value *IsNeg =
+        Builder.CreateICmpSLT(Arg, ConstantInt::get(ArgType, 0));
+    Value *Folded =
+        Builder.CreateSelect(IsNeg, Builder.CreateNot(Arg), Arg);
+    Function *F = CGM.getIntrinsic(Intrinsic::ctlz, ArgType);
+    Value *Clz = Builder.CreateCall(F, {Folded, Builder.getInt1(false)});
+    Value *Result = Builder.CreateSub(Clz, ConstantInt::get(ArgType, 1));
+
+    if (BuiltinID == RISCV::BI_CountLeadingSigns64)
+      Result = Builder.CreateTrunc(Result, Builder.getInt32Ty());
+    else
+      Result = Builder.CreateIntCast(Result, Builder.getInt32Ty(), false);
+    return Result;
+  }
+
+  case RISCV::BI_CountOneBits:
+  case RISCV::BI_CountOneBits64: {
+    Value *ArgValue = EmitScalarExpr(E->getArg(0));
+    llvm::Type *ArgType = ArgValue->getType();
+    Function *F = CGM.getIntrinsic(Intrinsic::ctpop, ArgType);
+
+    Value *Result = Builder.CreateCall(F, ArgValue);
+    if (BuiltinID == RISCV::BI_CountOneBits64)
+      Result = Builder.CreateTrunc(Result, Builder.getInt32Ty());
+    return Result;
+  }
+  default:
+    break;
+  }
+
+  if (std::optional<MSVCIntrin> MsvcIntId = translateRISCVToMsvcIntrin(BuiltinID))
+    return EmitMSVCBuiltinExpr(*MsvcIntId, E);
 
   SmallVector<Value *, 4> Ops;
   llvm::Type *ResultType = ConvertType(E->getType());

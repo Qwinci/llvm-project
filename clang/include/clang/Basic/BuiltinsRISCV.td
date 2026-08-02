@@ -18,6 +18,11 @@ class RISCVBuiltin<string prototype, string features = ""> : TargetBuiltin {
   let Features = features;
 }
 
+class RISCVLibBuiltin<string prototype> : TargetLibBuiltin {
+  let Spellings = [NAME];
+  let Prototype = prototype;
+}
+
 let Attributes = [NoThrow, Const] in {
 //===----------------------------------------------------------------------===//
 // Zbb extension.
@@ -152,6 +157,164 @@ def ntl_store : RISCVBuiltin<"void(...)">;
 //===----------------------------------------------------------------------===//
 let Features = "zihintpause", Attributes = [NoThrow] in
 def pause : RISCVBuiltin<"void()">;
+
+//===----------------------------------------------------------------------===//
+// MSVC-compatible intrinsics available through <intrin.h>, matching the set
+// provided on other Windows targets (e.g. AArch64, X86).
+//===----------------------------------------------------------------------===//
+let Header = "intrin.h", Languages = "ALL_MS_LANGUAGES",
+    Attributes = [NoThrow, RequireDeclaration] in {
+  def _BitScanForward : RISCVLibBuiltin<"unsigned char(msuint32_t *, msuint32_t)">;
+  def _BitScanReverse : RISCVLibBuiltin<"unsigned char(msuint32_t *, msuint32_t)">;
+  def _BitScanForward64 : RISCVLibBuiltin<"unsigned char(msuint32_t *, unsigned long long int)">;
+  def _BitScanReverse64 : RISCVLibBuiltin<"unsigned char(msuint32_t *, unsigned long long int)">;
+
+  def _InterlockedAnd64 : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedOr64 : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedXor64 : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedExchange64 : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedExchangeAdd64 : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedExchangeSub64 : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedIncrement64 : RISCVLibBuiltin<"long long int(long long int volatile *)">;
+  def _InterlockedDecrement64 : RISCVLibBuiltin<"long long int(long long int volatile *)">;
+
+  def _InterlockedCompareExchange128 : RISCVLibBuiltin<"unsigned char(long long int volatile *, long long int, long long int, long long int *)">;
+
+  def _ReadWriteBarrier : RISCVLibBuiltin<"void()">;
+  // _InterlockedAnd ordered variants
+  def _InterlockedAnd8_acq : RISCVLibBuiltin<"char(char volatile *, char)">;
+  def _InterlockedAnd8_nf : RISCVLibBuiltin<"char(char volatile *, char)">;
+  def _InterlockedAnd8_rel : RISCVLibBuiltin<"char(char volatile *, char)">;
+  def _InterlockedAnd16_acq : RISCVLibBuiltin<"short(short volatile *, short)">;
+  def _InterlockedAnd16_nf : RISCVLibBuiltin<"short(short volatile *, short)">;
+  def _InterlockedAnd16_rel : RISCVLibBuiltin<"short(short volatile *, short)">;
+  def _InterlockedAnd_acq : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedAnd_nf : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedAnd_rel : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedAnd64_acq : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedAnd64_nf : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedAnd64_rel : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  // _InterlockedOr ordered variants
+  def _InterlockedOr8_acq : RISCVLibBuiltin<"char(char volatile *, char)">;
+  def _InterlockedOr8_nf : RISCVLibBuiltin<"char(char volatile *, char)">;
+  def _InterlockedOr8_rel : RISCVLibBuiltin<"char(char volatile *, char)">;
+  def _InterlockedOr16_acq : RISCVLibBuiltin<"short(short volatile *, short)">;
+  def _InterlockedOr16_nf : RISCVLibBuiltin<"short(short volatile *, short)">;
+  def _InterlockedOr16_rel : RISCVLibBuiltin<"short(short volatile *, short)">;
+  def _InterlockedOr_acq : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedOr_nf : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedOr_rel : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedOr64_acq : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedOr64_nf : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedOr64_rel : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  // _InterlockedXor ordered variants
+  def _InterlockedXor8_acq : RISCVLibBuiltin<"char(char volatile *, char)">;
+  def _InterlockedXor8_nf : RISCVLibBuiltin<"char(char volatile *, char)">;
+  def _InterlockedXor8_rel : RISCVLibBuiltin<"char(char volatile *, char)">;
+  def _InterlockedXor16_acq : RISCVLibBuiltin<"short(short volatile *, short)">;
+  def _InterlockedXor16_nf : RISCVLibBuiltin<"short(short volatile *, short)">;
+  def _InterlockedXor16_rel : RISCVLibBuiltin<"short(short volatile *, short)">;
+  def _InterlockedXor_acq : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedXor_nf : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedXor_rel : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedXor64_acq : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedXor64_nf : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedXor64_rel : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  // _InterlockedExchange ordered variants
+  def _InterlockedExchange8_acq : RISCVLibBuiltin<"char(char volatile *, char)">;
+  def _InterlockedExchange8_nf : RISCVLibBuiltin<"char(char volatile *, char)">;
+  def _InterlockedExchange8_rel : RISCVLibBuiltin<"char(char volatile *, char)">;
+  def _InterlockedExchange16_acq : RISCVLibBuiltin<"short(short volatile *, short)">;
+  def _InterlockedExchange16_nf : RISCVLibBuiltin<"short(short volatile *, short)">;
+  def _InterlockedExchange16_rel : RISCVLibBuiltin<"short(short volatile *, short)">;
+  def _InterlockedExchange_acq : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedExchange_nf : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedExchange_rel : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedExchange64_acq : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedExchange64_nf : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedExchange64_rel : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  // _InterlockedExchangeAdd ordered variants
+  def _InterlockedExchangeAdd8_acq : RISCVLibBuiltin<"char(char volatile *, char)">;
+  def _InterlockedExchangeAdd8_nf : RISCVLibBuiltin<"char(char volatile *, char)">;
+  def _InterlockedExchangeAdd8_rel : RISCVLibBuiltin<"char(char volatile *, char)">;
+  def _InterlockedExchangeAdd16_acq : RISCVLibBuiltin<"short(short volatile *, short)">;
+  def _InterlockedExchangeAdd16_nf : RISCVLibBuiltin<"short(short volatile *, short)">;
+  def _InterlockedExchangeAdd16_rel : RISCVLibBuiltin<"short(short volatile *, short)">;
+  def _InterlockedExchangeAdd_acq : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedExchangeAdd_nf : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedExchangeAdd_rel : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedExchangeAdd64_acq : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedExchangeAdd64_nf : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedExchangeAdd64_rel : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  // _InterlockedAdd (returns new value)
+  def _InterlockedAdd : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedAdd_acq : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedAdd_nf : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedAdd_rel : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t)">;
+  def _InterlockedAdd64 : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedAdd64_acq : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedAdd64_nf : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  def _InterlockedAdd64_rel : RISCVLibBuiltin<"long long int(long long int volatile *, long long int)">;
+  // _InterlockedIncrement ordered variants
+  def _InterlockedIncrement16_acq : RISCVLibBuiltin<"short(short volatile *)">;
+  def _InterlockedIncrement16_nf : RISCVLibBuiltin<"short(short volatile *)">;
+  def _InterlockedIncrement16_rel : RISCVLibBuiltin<"short(short volatile *)">;
+  def _InterlockedIncrement_acq : RISCVLibBuiltin<"msint32_t(msint32_t volatile *)">;
+  def _InterlockedIncrement_nf : RISCVLibBuiltin<"msint32_t(msint32_t volatile *)">;
+  def _InterlockedIncrement_rel : RISCVLibBuiltin<"msint32_t(msint32_t volatile *)">;
+  def _InterlockedIncrement64_acq : RISCVLibBuiltin<"long long int(long long int volatile *)">;
+  def _InterlockedIncrement64_nf : RISCVLibBuiltin<"long long int(long long int volatile *)">;
+  def _InterlockedIncrement64_rel : RISCVLibBuiltin<"long long int(long long int volatile *)">;
+  // _InterlockedDecrement ordered variants
+  def _InterlockedDecrement16_acq : RISCVLibBuiltin<"short(short volatile *)">;
+  def _InterlockedDecrement16_nf : RISCVLibBuiltin<"short(short volatile *)">;
+  def _InterlockedDecrement16_rel : RISCVLibBuiltin<"short(short volatile *)">;
+  def _InterlockedDecrement_acq : RISCVLibBuiltin<"msint32_t(msint32_t volatile *)">;
+  def _InterlockedDecrement_nf : RISCVLibBuiltin<"msint32_t(msint32_t volatile *)">;
+  def _InterlockedDecrement_rel : RISCVLibBuiltin<"msint32_t(msint32_t volatile *)">;
+  def _InterlockedDecrement64_acq : RISCVLibBuiltin<"long long int(long long int volatile *)">;
+  def _InterlockedDecrement64_nf : RISCVLibBuiltin<"long long int(long long int volatile *)">;
+  def _InterlockedDecrement64_rel : RISCVLibBuiltin<"long long int(long long int volatile *)">;
+  // _InterlockedCompareExchange ordered variants
+  def _InterlockedCompareExchange8_acq : RISCVLibBuiltin<"char(char volatile *, char, char)">;
+  def _InterlockedCompareExchange8_nf : RISCVLibBuiltin<"char(char volatile *, char, char)">;
+  def _InterlockedCompareExchange8_rel : RISCVLibBuiltin<"char(char volatile *, char, char)">;
+  def _InterlockedCompareExchange16_acq : RISCVLibBuiltin<"short(short volatile *, short, short)">;
+  def _InterlockedCompareExchange16_nf : RISCVLibBuiltin<"short(short volatile *, short, short)">;
+  def _InterlockedCompareExchange16_rel : RISCVLibBuiltin<"short(short volatile *, short, short)">;
+  def _InterlockedCompareExchange_acq : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t, msint32_t)">;
+  def _InterlockedCompareExchange_nf : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t, msint32_t)">;
+  def _InterlockedCompareExchange_rel : RISCVLibBuiltin<"msint32_t(msint32_t volatile *, msint32_t, msint32_t)">;
+  def _InterlockedCompareExchange64_acq : RISCVLibBuiltin<"long long int(long long int volatile *, long long int, long long int)">;
+  def _InterlockedCompareExchange64_nf : RISCVLibBuiltin<"long long int(long long int volatile *, long long int, long long int)">;
+  def _InterlockedCompareExchange64_rel : RISCVLibBuiltin<"long long int(long long int volatile *, long long int, long long int)">;
+  // pointer exchange/compare-exchange ordered variants
+  def _InterlockedExchangePointer_acq : RISCVLibBuiltin<"void *(void *volatile *, void *)">;
+  def _InterlockedExchangePointer_nf : RISCVLibBuiltin<"void *(void *volatile *, void *)">;
+  def _InterlockedExchangePointer_rel : RISCVLibBuiltin<"void *(void *volatile *, void *)">;
+  def _InterlockedCompareExchangePointer_acq : RISCVLibBuiltin<"void *(void *volatile *, void *, void *)">;
+  def _InterlockedCompareExchangePointer_rel : RISCVLibBuiltin<"void *(void *volatile *, void *, void *)">;
+  // _InterlockedCompareExchange128 ordered variants
+  def _InterlockedCompareExchange128_acq : RISCVLibBuiltin<"unsigned char(long long int volatile *, long long int, long long int, long long int *)">;
+  def _InterlockedCompareExchange128_nf : RISCVLibBuiltin<"unsigned char(long long int volatile *, long long int, long long int, long long int *)">;
+  def _InterlockedCompareExchange128_rel : RISCVLibBuiltin<"unsigned char(long long int volatile *, long long int, long long int, long long int *)">;
+  // High multiply, bit counting, bit copy, return address
+  def __mulh : RISCVLibBuiltin<"long long int(long long int, long long int)">;
+  def __umulh : RISCVLibBuiltin<"unsigned long long int(unsigned long long int, unsigned long long int)">;
+  def _AddressOfReturnAddress : RISCVLibBuiltin<"void *()">;
+  def _CopyFloatFromInt32 : RISCVLibBuiltin<"float(int)">;
+  def _CopyInt32FromFloat : RISCVLibBuiltin<"int(float)">;
+  def _CopyDoubleFromInt64 : RISCVLibBuiltin<"double(long long int)">;
+  def _CopyInt64FromDouble : RISCVLibBuiltin<"long long int(double)">;
+  def _CountLeadingZeros : RISCVLibBuiltin<"unsigned int(msuint32_t)">;
+  def _CountLeadingZeros64 : RISCVLibBuiltin<"unsigned int(unsigned long long int)">;
+  def _CountLeadingOnes : RISCVLibBuiltin<"unsigned int(msuint32_t)">;
+  def _CountLeadingOnes64 : RISCVLibBuiltin<"unsigned int(unsigned long long int)">;
+  def _CountLeadingSigns : RISCVLibBuiltin<"unsigned int(msint32_t)">;
+  def _CountLeadingSigns64 : RISCVLibBuiltin<"unsigned int(long long int)">;
+  def _CountOneBits : RISCVLibBuiltin<"unsigned int(msuint32_t)">;
+  def _CountOneBits64 : RISCVLibBuiltin<"unsigned int(unsigned long long int)">;
+}
 
 //===----------------------------------------------------------------------===//
 // XCV extensions.

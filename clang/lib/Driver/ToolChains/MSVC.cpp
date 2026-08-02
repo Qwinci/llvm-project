@@ -23,6 +23,7 @@
 #include "llvm/Support/Process.h"
 #include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/Triple.h"
 #include <cstdio>
 
 #ifdef _WIN32
@@ -481,7 +482,8 @@ MSVCToolChain::getDefaultUnwindTableLevel(const ArgList &Args) const {
   // doesn't know how to generate them for all targets, so only enable
   // the ones that are actually implemented.
   if (getArch() == llvm::Triple::x86_64 || getArch() == llvm::Triple::arm ||
-      getArch() == llvm::Triple::thumb || getArch() == llvm::Triple::aarch64)
+      getArch() == llvm::Triple::thumb || getArch() == llvm::Triple::aarch64 ||
+      getArch() == llvm::Triple::riscv64)
     return UnwindTableLevel::Asynchronous;
 
   return UnwindTableLevel::None;
@@ -489,7 +491,8 @@ MSVCToolChain::getDefaultUnwindTableLevel(const ArgList &Args) const {
 
 bool MSVCToolChain::isPICDefault() const {
   return getArch() == llvm::Triple::x86_64 ||
-         getArch() == llvm::Triple::aarch64;
+         getArch() == llvm::Triple::aarch64 ||
+         getArch() == llvm::Triple::riscv64;
 }
 
 bool MSVCToolChain::isPIEDefault(const llvm::opt::ArgList &Args) const {
@@ -498,7 +501,8 @@ bool MSVCToolChain::isPIEDefault(const llvm::opt::ArgList &Args) const {
 
 bool MSVCToolChain::isPICDefaultForced() const {
   return getArch() == llvm::Triple::x86_64 ||
-         getArch() == llvm::Triple::aarch64;
+         getArch() == llvm::Triple::aarch64 ||
+         getArch() == llvm::Triple::riscv64;
 }
 
 void MSVCToolChain::AddCudaIncludeArgs(const ArgList &DriverArgs,

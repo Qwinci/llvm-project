@@ -473,6 +473,14 @@ std::unique_ptr<TargetInfo> AllocateTarget(const llvm::Triple &Triple,
                                                                      Opts);
     case llvm::Triple::Hurd:
       return std::make_unique<HurdTargetInfo<RISCV64TargetInfo>>(Triple, Opts);
+    case llvm::Triple::Win32:
+      switch (Triple.getEnvironment()) {
+      case llvm::Triple::GNU:
+        return std::make_unique<MinGWRISCV64TargetInfo>(Triple, Opts);
+      case llvm::Triple::MSVC:
+      default: // Assume MSVC for unknown environments
+        return std::make_unique<MicrosoftRISCV64TargetInfo>(Triple, Opts);
+      }
     default:
       return std::make_unique<RISCV64TargetInfo>(Triple, Opts);
     }

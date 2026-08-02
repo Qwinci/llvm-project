@@ -149,6 +149,9 @@ void tools::MinGW::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   case llvm::Triple::mipsel:
     CmdArgs.push_back("mipspe");
     break;
+  case llvm::Triple::riscv64:
+    CmdArgs.push_back("riscv64pe");
+    break;
   default:
     D.Diag(diag::err_target_unknown_triple) << TC.getEffectiveTriple().str();
   }
@@ -596,14 +599,16 @@ toolchains::MinGW::getDefaultUnwindTableLevel(const ArgList &Args) const {
     return UnwindTableLevel::Asynchronous;
 
   if (getArch() == llvm::Triple::x86_64 || getArch() == llvm::Triple::arm ||
-      getArch() == llvm::Triple::thumb || getArch() == llvm::Triple::aarch64)
+      getArch() == llvm::Triple::thumb || getArch() == llvm::Triple::aarch64 ||
+      getArch() == llvm::Triple::riscv64)
     return UnwindTableLevel::Asynchronous;
   return UnwindTableLevel::None;
 }
 
 bool toolchains::MinGW::isPICDefault() const {
   return getArch() == llvm::Triple::x86_64 ||
-         getArch() == llvm::Triple::aarch64;
+         getArch() == llvm::Triple::aarch64 ||
+         getArch() == llvm::Triple::riscv64;
 }
 
 bool toolchains::MinGW::isPIEDefault(const llvm::opt::ArgList &Args) const {
@@ -615,7 +620,8 @@ bool toolchains::MinGW::isPICDefaultForced() const { return true; }
 llvm::ExceptionHandling
 toolchains::MinGW::GetExceptionModel(const ArgList &Args) const {
   if (getArch() == llvm::Triple::x86_64 || getArch() == llvm::Triple::aarch64 ||
-      getArch() == llvm::Triple::arm || getArch() == llvm::Triple::thumb)
+      getArch() == llvm::Triple::arm || getArch() == llvm::Triple::thumb ||
+      getArch() == llvm::Triple::riscv64)
     return llvm::ExceptionHandling::WinEH;
   return llvm::ExceptionHandling::DwarfCFI;
 }

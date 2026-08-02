@@ -13,6 +13,7 @@
 #ifndef LLVM_CLANG_LIB_BASIC_TARGETS_RISCV_H
 #define LLVM_CLANG_LIB_BASIC_TARGETS_RISCV_H
 
+#include "OSTargets.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/TargetOptions.h"
 #include "llvm/Support/Compiler.h"
@@ -230,6 +231,40 @@ public:
     if (ISAInfo->hasExtension("zalrsc"))
       MaxAtomicInlineWidth = 64;
   }
+};
+
+class LLVM_LIBRARY_VISIBILITY WindowsRISCV64TargetInfo
+    : public WindowsTargetInfo<RISCV64TargetInfo> {
+public:
+  WindowsRISCV64TargetInfo(const llvm::Triple &Triple,
+                           const TargetOptions &Opts);
+
+  BuiltinVaListKind getBuiltinVaListKind() const override;
+
+  CallingConvCheckResult checkCallingConvention(CallingConv CC) const override;
+};
+
+// Windows RISCV, MS (C++) ABI
+class LLVM_LIBRARY_VISIBILITY MicrosoftRISCV64TargetInfo
+    : public WindowsRISCV64TargetInfo {
+public:
+  MicrosoftRISCV64TargetInfo(const llvm::Triple &Triple,
+                             const TargetOptions &Opts);
+
+  void getTargetDefines(const LangOptions &Opts,
+                        MacroBuilder &Builder) const override;
+  TargetInfo::CallingConvKind
+  getCallingConvKind(bool ClangABICompat4) const override;
+
+  unsigned getMinGlobalAlign(uint64_t TypeSize,
+                             bool HasNonWeakDef) const override;
+};
+
+// RISCV64 MinGW target
+class LLVM_LIBRARY_VISIBILITY MinGWRISCV64TargetInfo
+    : public WindowsRISCV64TargetInfo {
+public:
+  MinGWRISCV64TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts);
 };
 } // namespace targets
 } // namespace clang

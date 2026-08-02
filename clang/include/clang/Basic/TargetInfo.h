@@ -1659,7 +1659,8 @@ public:
   bool isSEHTrySupported() const {
     return getTriple().isOSWindows() &&
            (getTriple().isX86() ||
-            getTriple().getArch() == llvm::Triple::aarch64);
+            getTriple().getArch() == llvm::Triple::aarch64 ||
+            getTriple().getArch() == llvm::Triple::riscv64);
   }
 
   /// Return true if {|} are normal characters in the asm string.

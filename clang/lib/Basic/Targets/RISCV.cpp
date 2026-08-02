@@ -643,3 +643,87 @@ bool RISCVTargetInfo::validateCpuIs(StringRef CPUName) const {
 
   return llvm::RISCV::hasValidCPUModel(CPUName);
 }
+
+WindowsRISCV64TargetInfo::WindowsRISCV64TargetInfo(const llvm::Triple &Triple,
+                                                   const TargetOptions &Opts)
+    : WindowsTargetInfo<RISCV64TargetInfo>(Triple, Opts) {
+  // This is an LLP64 platform.
+  // int:4, long:4, long long:8, long double:8.
+  IntWidth = IntAlign = 32;
+  LongWidth = LongAlign = 32;
+  DoubleAlign = LongLongAlign = 64;
+  LongDoubleWidth = LongDoubleAlign = 64;
+  LongDoubleFormat = &llvm::APFloat::IEEEdouble();
+  IntMaxType = SignedLongLong;
+  Int64Type = SignedLongLong;
+  SizeType = UnsignedLongLong;
+  PtrDiffType = SignedLongLong;
+  IntPtrType = SignedLongLong;
+}
+
+TargetInfo::BuiltinVaListKind
+WindowsRISCV64TargetInfo::getBuiltinVaListKind() const {
+  return TargetInfo::CharPtrBuiltinVaList;
+}
+
+TargetInfo::CallingConvCheckResult
+WindowsRISCV64TargetInfo::checkCallingConvention(CallingConv CC) const {
+  switch (CC) {
+  case CC_X86VectorCall:
+  case CC_X86StdCall:
+  case CC_X86ThisCall:
+  case CC_X86FastCall:
+    return CCCR_Ignore;
+  case CC_C:
+  case CC_DeviceKernel:
+  case CC_PreserveMost:
+  case CC_PreserveAll:
+  case CC_PreserveNone:
+  case CC_Swift:
+  case CC_SwiftAsync:
+  case CC_Win64:
+    return CCCR_OK;
+  default:
+    return CCCR_Warning;
+  }
+}
+
+MicrosoftRISCV64TargetInfo::MicrosoftRISCV64TargetInfo(
+    const llvm::Triple &Triple, const TargetOptions &Opts)
+    : WindowsRISCV64TargetInfo(Triple, Opts) {
+  TheCXXABI.set(TargetCXXABI::Microsoft);
+}
+
+void MicrosoftRISCV64TargetInfo::getTargetDefines(const LangOptions &Opts,
+                                                  MacroBuilder &Builder) const {
+  WindowsRISCV64TargetInfo::getTargetDefines(Opts, Builder);
+  Builder.defineMacro("_M_RISCV64", "1");
+}
+
+TargetInfo::CallingConvKind
+MicrosoftRISCV64TargetInfo::getCallingConvKind(bool ClangABICompat4) const {
+  return CCK_MicrosoftWin64;
+}
+
+unsigned
+MicrosoftRISCV64TargetInfo::getMinGlobalAlign(uint64_t TypeSize,
+                                              bool HasNonWeakDef) const {
+  unsigned Align =
+      WindowsRISCV64TargetInfo::getMinGlobalAlign(TypeSize, HasNonWeakDef);
+
+  // Apply the same size-based global alignment MSVC uses on ARM64, so globals
+  // are laid out consistently across the Windows targets.
+  if (TypeSize >= 512)             // TypeSize >= 64 bytes
+    Align = std::max(Align, 128u); // align type at least 16 bytes
+  else if (TypeSize >= 64)         // TypeSize >= 8 bytes
+    Align = std::max(Align, 64u);  // align type at least 8 bytes
+  else if (TypeSize >= 16)         // TypeSize >= 2 bytes
+    Align = std::max(Align, 32u);  // align type at least 4 bytes
+  return Align;
+}
+
+MinGWRISCV64TargetInfo::MinGWRISCV64TargetInfo(const llvm::Triple &Triple,
+                                               const TargetOptions &Opts)
+    : WindowsRISCV64TargetInfo(Triple, Opts) {
+  TheCXXABI.set(TargetCXXABI::GenericItanium);
+}

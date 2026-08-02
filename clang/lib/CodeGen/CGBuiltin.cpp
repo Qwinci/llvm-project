@@ -1989,7 +1989,7 @@ Value *CodeGenFunction::EmitMSVCBuiltinExpr(MSVCIntrin BuiltinID,
     switch (ISA) {
     default:
       ErrorUnsupported(E, "__fastfail call for this architecture");
-      break;
+      return nullptr;
     case llvm::Triple::x86:
     case llvm::Triple::x86_64:
       Asm = "int $$0x29";
@@ -2002,6 +2002,15 @@ Value *CodeGenFunction::EmitMSVCBuiltinExpr(MSVCIntrin BuiltinID,
     case llvm::Triple::aarch64:
       Asm = "brk #0xF003";
       Constraints = "{w0}";
+      break;
+    case llvm::Triple::riscv32:
+    case llvm::Triple::riscv64:
+      // There is no Windows-defined fast-fail sequence for RISC-V, so use an
+      // ebreak with the fail code in a0, mirroring the AArch64 convention of
+      // trapping with the code in the first argument register.
+      Asm = "ebreak";
+      Constraints = "{a0}";
+      break;
     }
     llvm::FunctionType *FTy = llvm::FunctionType::get(VoidTy, {Int32Ty}, false);
     llvm::InlineAsm *IA =
