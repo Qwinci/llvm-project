@@ -368,6 +368,178 @@ void SectionChunk::applyRelARM64(uint8_t *off, uint16_t type, OutputSection *os,
   }
 }
 
+// The IMAGE_REL_RISCV64_* relocation types are LLVM's own; see
+// llvm/BinaryFormat/COFF.h. The instruction encodings below mirror lld's ELF
+// RISCV backend (lld/ELF/Arch/RISCV.cpp).
+void applyRiscvHi20(uint8_t *off, int64_t val) {
+  if (!isInt<32>(val))
+    error("relocation out of range");
+  uint32_t hi = (uint32_t)((val + 0x800) & 0xfffff000);
+  write32le(off, (read32le(off) & 0xfff) | hi);
+}
+
+void applyRiscvLo12I(uint8_t *off, int64_t val) {
+  uint32_t lo = val & 0xfff;
+  write32le(off, (read32le(off) & 0xfffff) | (lo << 20));
+}
+
+static void applyRiscvLo12S(uint8_t *off, int64_t val) {
+  uint32_t lo = val & 0xfff;
+  uint32_t insn = read32le(off) & 0x1fff07f;
+  insn |= ((lo >> 5) & 0x7f) << 25;
+  insn |= (lo & 0x1f) << 7;
+  write32le(off, insn);
+}
+
+static void applyRiscvJal(uint8_t *off, int64_t val) {
+  if (!isInt<21>(val))
+    error("relocation out of range");
+  uint32_t insn = read32le(off) & 0xfff;
+  uint32_t imm20 = (val >> 20) & 0x1;
+  uint32_t imm10_1 = (val >> 1) & 0x3ff;
+  uint32_t imm11 = (val >> 11) & 0x1;
+  uint32_t imm19_12 = (val >> 12) & 0xff;
+  insn |= (imm20 << 31) | (imm10_1 << 21) | (imm11 << 20) | (imm19_12 << 12);
+  write32le(off, insn);
+}
+
+static void applyRiscvBranch(uint8_t *off, int64_t val) {
+  if (!isInt<13>(val))
+    error("relocation out of range");
+  uint32_t insn = read32le(off) & 0x1fff07f;
+  uint32_t imm12 = (val >> 12) & 0x1;
+  uint32_t imm10_5 = (val >> 5) & 0x3f;
+  uint32_t imm4_1 = (val >> 1) & 0xf;
+  uint32_t imm11 = (val >> 11) & 0x1;
+  insn |= (imm12 << 31) | (imm10_5 << 25) | (imm4_1 << 8) | (imm11 << 7);
+  write32le(off, insn);
+}
+
+static void applyRiscvRvcJump(uint8_t *off, int64_t val) {
+  if (!isInt<12>(val))
+    error("relocation out of range");
+  uint16_t insn = read16le(off) & 0xe003;
+  uint16_t imm11 = (val >> 11) & 0x1;
+  uint16_t imm4 = (val >> 4) & 0x1;
+  uint16_t imm9_8 = (val >> 8) & 0x3;
+  uint16_t imm10 = (val >> 10) & 0x1;
+  uint16_t imm6 = (val >> 6) & 0x1;
+  uint16_t imm7 = (val >> 7) & 0x1;
+  uint16_t imm3_1 = (val >> 1) & 0x7;
+  uint16_t imm5 = (val >> 5) & 0x1;
+  insn |= (imm11 << 12) | (imm4 << 11) | (imm9_8 << 9) | (imm10 << 8) |
+          (imm6 << 7) | (imm7 << 6) | (imm3_1 << 3) | (imm5 << 2);
+  write16le(off, insn);
+}
+
+static void applyRiscvRvcBranch(uint8_t *off, int64_t val) {
+  if (!isInt<9>(val))
+    error("relocation out of range");
+  uint16_t insn = read16le(off) & 0xe383;
+  uint16_t imm8 = (val >> 8) & 0x1;
+  uint16_t imm4_3 = (val >> 3) & 0x3;
+  uint16_t imm7_6 = (val >> 6) & 0x3;
+  uint16_t imm2_1 = (val >> 1) & 0x3;
+  uint16_t imm5 = (val >> 5) & 0x1;
+  insn |= (imm8 << 12) | (imm4_3 << 10) | (imm7_6 << 5) | (imm2_1 << 3) |
+          (imm5 << 2);
+  write16le(off, insn);
+}
+
+void SectionChunk::applyRelRISCV64(uint8_t *off, uint16_t type,
+                                   OutputSection *os, uint64_t s, uint64_t p,
+                                   uint64_t imageBase) const {
+  switch (type) {
+  case IMAGE_REL_RISCV64_ADDR32:
+    add32(off, s + imageBase);
+    break;
+  case IMAGE_REL_RISCV64_ADDR32NB:
+    add32(off, s);
+    break;
+  case IMAGE_REL_RISCV64_ADDR64:
+    add64(off, s + imageBase);
+    break;
+  case IMAGE_REL_RISCV64_SECTION:
+    applySecIdx(off, os, file->symtab.ctx.outputSections.size());
+    break;
+  case IMAGE_REL_RISCV64_SECREL:
+    applySecRel(this, off, os, s);
+    break;
+  case IMAGE_REL_RISCV64_PCREL_HI20: {
+    // The auipc's existing immediate holds the byte addend (the offset from
+    // the referenced symbol). COFF has no relocation addend field, so the MC
+    // layer stores the addend there; fold it into the symbol address before
+    // taking the pc-relative high part, so the +0x800 carry is computed on the
+    // full target value rather than dropped. Mirrors AArch64's applyArm64Addr.
+    int64_t addend = SignExtend64<20>(read32le(off) >> 12);
+    applyRiscvHi20(off, (int64_t)(s + addend) - (int64_t)p);
+    break;
+  }
+  case IMAGE_REL_RISCV64_PCREL_LO12_I: {
+    // `s` is the %pcrel_hi target symbol, not the %pcrel_hi instruction's
+    // address. RISCVAsmBackend::evaluateFixup bakes the (small) distance
+    // between the two instructions into the encoded immediate, so adding
+    // s - p reconstructs the value the paired PCREL_HI20 computed.
+    int64_t delta = SignExtend64<12>(read32le(off) >> 20);
+    applyRiscvLo12I(off, delta + (int64_t)(s - p));
+    break;
+  }
+  case IMAGE_REL_RISCV64_PCREL_LO12_S: {
+    uint32_t insn = read32le(off);
+    int64_t delta =
+        SignExtend64<12>(((insn >> 25) & 0x7f) << 5 | ((insn >> 7) & 0x1f));
+    applyRiscvLo12S(off, delta + (int64_t)(s - p));
+    break;
+  }
+  case IMAGE_REL_RISCV64_JAL:
+    applyRiscvJal(off, s - p);
+    break;
+  case IMAGE_REL_RISCV64_BRANCH:
+    applyRiscvBranch(off, s - p);
+    break;
+  case IMAGE_REL_RISCV64_RVC_JUMP:
+    applyRiscvRvcJump(off, s - p);
+    break;
+  case IMAGE_REL_RISCV64_RVC_BRANCH:
+    applyRiscvRvcBranch(off, s - p);
+    break;
+  case IMAGE_REL_RISCV64_CALL: {
+    // Spans the auipc+jalr pair emitted for the `call`/`tail` pseudo-ops.
+    // Both share the same symbol and PC baseline, so no %pcrel_hi/%pcrel_lo
+    // indirection is needed.
+    int64_t val = s - p;
+    applyRiscvHi20(off, val);
+    applyRiscvLo12I(off + 4, val);
+    break;
+  }
+  case IMAGE_REL_RISCV64_REL32:
+    add32(off, s - p - 4);
+    break;
+  case IMAGE_REL_RISCV64_SECREL_HI20:
+  case IMAGE_REL_RISCV64_SECREL_LO12_I: {
+    // Both fixups reference the target symbol directly -- unlike
+    // PCREL_HI20/LO12_I there is no local anchor label in between -- so each
+    // is computed independently from the symbol's offset within its section,
+    // as for SECREL. Unlike PCREL_HI20 this deliberately ignores the
+    // instruction's in-place immediate: codegen materializes any element/field
+    // offset as a separate add (see clang/test/CodeGen/riscv64-windows-tls.c),
+    // never folding it into this pair, so there is no inline addend to carry.
+    // If that ever changes, this must read the addend the way PCREL_HI20 does.
+    if (!checkSecRel(this, os))
+      break;
+    int64_t val = (int64_t)(s - os->getRVA());
+    if (type == IMAGE_REL_RISCV64_SECREL_HI20)
+      applyRiscvHi20(off, val);
+    else
+      applyRiscvLo12I(off, val);
+    break;
+  }
+  default:
+    error("unsupported relocation type 0x" + Twine::utohexstr(type) + " in " +
+          toString(file));
+  }
+}
+
 static void maybeReportRelocationToDiscarded(const SectionChunk *fromChunk,
                                              Defined *sym,
                                              const coff_relocation &rel,
@@ -466,6 +638,9 @@ void SectionChunk::applyRelocation(uint8_t *off,
   case Triple::aarch64:
     applyRelARM64(off, rel.Type, os, s, p, imageBase);
     break;
+  case Triple::riscv64:
+    applyRelRISCV64(off, rel.Type, os, s, p, imageBase);
+    break;
   default:
     llvm_unreachable("unknown machine type");
   }
@@ -550,6 +725,10 @@ static uint8_t getBaserelType(const coff_relocation &rel,
     return IMAGE_REL_BASED_ABSOLUTE;
   case Triple::aarch64:
     if (rel.Type == IMAGE_REL_ARM64_ADDR64)
+      return IMAGE_REL_BASED_DIR64;
+    return IMAGE_REL_BASED_ABSOLUTE;
+  case Triple::riscv64:
+    if (rel.Type == IMAGE_REL_RISCV64_ADDR64)
       return IMAGE_REL_BASED_DIR64;
     return IMAGE_REL_BASED_ABSOLUTE;
   default:
@@ -658,6 +837,15 @@ static int getRuntimePseudoRelocSize(uint16_t type, Triple::ArchType arch) {
     case IMAGE_REL_ARM64_ADDR64:
       return 64;
     case IMAGE_REL_ARM64_ADDR32:
+      return 32;
+    default:
+      return 0;
+    }
+  case Triple::riscv64:
+    switch (type) {
+    case IMAGE_REL_RISCV64_ADDR64:
+      return 64;
+    case IMAGE_REL_RISCV64_ADDR32:
       return 32;
     default:
       return 0;
@@ -840,6 +1028,13 @@ void ImportThunkChunkARM64::writeTo(uint8_t *buf) const {
   memcpy(buf, importThunkARM64, sizeof(importThunkARM64));
   applyArm64Addr(buf, impSymbol->getRVA(), rva, 12);
   applyArm64Ldr(buf + 4, off);
+}
+
+void ImportThunkChunkRISCV64::writeTo(uint8_t *buf) const {
+  memcpy(buf, importThunkRISCV64, sizeof(importThunkRISCV64));
+  int64_t delta = impSymbol->getRVA() - rva;
+  applyRiscvHi20(buf, delta);
+  applyRiscvLo12I(buf + 4, delta);
 }
 
 // A Thumb2, PIC, non-interworking range extension thunk.

@@ -2430,7 +2430,8 @@ void LinkerDriver::linkerMain(ArrayRef<const char *> argsArr) {
   config->mergeDebugDirectory = !args.hasArg(OPT_nodbgdirmerge);
 
   if (!config->dynamicBase &&
-      (config->machine == ARMNT || isAnyArm64(config->machine)))
+      (config->machine == ARMNT || isAnyArm64(config->machine) ||
+       config->machine == RISCV64))
     Err(ctx) << "/dynamicbase:no is not compatible with "
              << machineToStr(config->machine);
 

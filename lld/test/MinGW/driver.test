@@ -43,6 +43,15 @@ MIPS-SAME: -machine:mips
 MIPS-SAME: -alternatename:__image_base__=__ImageBase
 MIPS-SAME: foo.o
 
+; riscv64pe is named after arm64pe/mipspe. Both isPETargetName() in
+; lld/Common/DriverDispatcher.cpp and the -m table below need to know it, or
+; the link is misrouted to lld's ELF driver.
+RUN: ld.lld -### foo.o -m riscv64pe 2>&1 | FileCheck -check-prefix=RISCV64 %s
+RISCV64:      -out:a.exe
+RISCV64-SAME: -machine:riscv64
+RISCV64-SAME: -alternatename:__image_base__=__ImageBase
+RISCV64-SAME: foo.o
+
 RUN: ld.lld -### foo.o -m i386pep -shared 2>&1 | FileCheck -check-prefix=SHARED %s
 RUN: ld.lld -### foo.o -m i386pep --shared 2>&1 | FileCheck -check-prefix=SHARED %s
 RUN: ld.lld -### foo.o -m i386pep --dll 2>&1 | FileCheck -check-prefix=SHARED %s

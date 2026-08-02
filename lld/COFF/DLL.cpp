@@ -351,6 +351,81 @@ static const uint8_t tailMergeARM64[] = {
     0x00, 0x02, 0x1f, 0xd6, // br      x16
 };
 
+// Delay-load thunk for RISCV64. Materializes the address of the __imp_ slot in
+// t1 and tail-jumps to the shared tail-merge chunk. auipc+jalr is used rather
+// than a plain `j` so the reach is +/-2GB rather than +/-1MB.
+static const uint8_t thunkRISCV64[] = {
+    0x17, 0x03, 0x00, 0x00, // auipc t1, %pcrel_hi(__imp_<FUNCNAME>)
+    0x13, 0x03, 0x03, 0x00, // addi  t1, t1, %pcrel_lo(__imp_<FUNCNAME>)
+    0x97, 0x03, 0x00, 0x00, // auipc t2, %pcrel_hi(__tailMerge_<lib>)
+    0x67, 0x80, 0x03, 0x00, // jr    t2
+};
+
+// Spills every register that can carry an outgoing argument of the delayed
+// call (a0-a7, fa0-fa7) plus ra, calls __delayLoadHelper2 with the descriptor
+// in a0 and the __imp_ slot in a1, then restores them and jumps to the address
+// the helper resolved. The FP spills assume the lp64d ABI, which this target
+// requires.
+static const uint8_t tailMergeRISCV64[] = {
+    0x13, 0x01, 0x01, 0xf7, // addi  sp, sp, -144
+    0x23, 0x30, 0x11, 0x08, // sd    ra, 128(sp)
+    0x23, 0x30, 0xa1, 0x00, // sd    a0, 0(sp)
+    0x23, 0x34, 0xb1, 0x00, // sd    a1, 8(sp)
+    0x23, 0x38, 0xc1, 0x00, // sd    a2, 16(sp)
+    0x23, 0x3c, 0xd1, 0x00, // sd    a3, 24(sp)
+    0x23, 0x30, 0xe1, 0x02, // sd    a4, 32(sp)
+    0x23, 0x34, 0xf1, 0x02, // sd    a5, 40(sp)
+    0x23, 0x38, 0x01, 0x03, // sd    a6, 48(sp)
+    0x23, 0x3c, 0x11, 0x03, // sd    a7, 56(sp)
+    0x27, 0x30, 0xa1, 0x04, // fsd   fa0, 64(sp)
+    0x27, 0x34, 0xb1, 0x04, // fsd   fa1, 72(sp)
+    0x27, 0x38, 0xc1, 0x04, // fsd   fa2, 80(sp)
+    0x27, 0x3c, 0xd1, 0x04, // fsd   fa3, 88(sp)
+    0x27, 0x30, 0xe1, 0x06, // fsd   fa4, 96(sp)
+    0x27, 0x34, 0xf1, 0x06, // fsd   fa5, 104(sp)
+    0x27, 0x38, 0x01, 0x07, // fsd   fa6, 112(sp)
+    0x27, 0x3c, 0x11, 0x07, // fsd   fa7, 120(sp)
+    0x93, 0x05, 0x03, 0x00, // mv    a1, t1  (&__imp_<FUNCNAME>)
+    0x17, 0x05, 0x00, 0x00, // auipc a0, %pcrel_hi(DELAY_IMPORT_DESCRIPTOR)
+    0x13, 0x05, 0x05, 0x00, // addi  a0, a0, %pcrel_lo(DELAY_IMPORT_DESCRIPTOR)
+    0x97, 0x03, 0x00, 0x00, // auipc t2, %pcrel_hi(__delayLoadHelper2)
+    0xe7, 0x80, 0x03, 0x00, // jalr  ra, %pcrel_lo(__delayLoadHelper2)(t2)
+    0x13, 0x0e, 0x05, 0x00, // mv    t3, a0  (resolved target)
+    0x83, 0x30, 0x01, 0x08, // ld    ra, 128(sp)
+    0x03, 0x35, 0x01, 0x00, // ld    a0, 0(sp)
+    0x83, 0x35, 0x81, 0x00, // ld    a1, 8(sp)
+    0x03, 0x36, 0x01, 0x01, // ld    a2, 16(sp)
+    0x83, 0x36, 0x81, 0x01, // ld    a3, 24(sp)
+    0x03, 0x37, 0x01, 0x02, // ld    a4, 32(sp)
+    0x83, 0x37, 0x81, 0x02, // ld    a5, 40(sp)
+    0x03, 0x38, 0x01, 0x03, // ld    a6, 48(sp)
+    0x83, 0x38, 0x81, 0x03, // ld    a7, 56(sp)
+    0x07, 0x35, 0x01, 0x04, // fld   fa0, 64(sp)
+    0x87, 0x35, 0x81, 0x04, // fld   fa1, 72(sp)
+    0x07, 0x36, 0x01, 0x05, // fld   fa2, 80(sp)
+    0x87, 0x36, 0x81, 0x05, // fld   fa3, 88(sp)
+    0x07, 0x37, 0x01, 0x06, // fld   fa4, 96(sp)
+    0x87, 0x37, 0x81, 0x06, // fld   fa5, 104(sp)
+    0x07, 0x38, 0x01, 0x07, // fld   fa6, 112(sp)
+    0x87, 0x38, 0x81, 0x07, // fld   fa7, 120(sp)
+    0x13, 0x01, 0x01, 0x09, // addi  sp, sp, 144
+    0x67, 0x00, 0x0e, 0x00, // jr    t3
+};
+
+// UNWIND_INFO describing tailMergeRISCV64. Only the stack allocation and the
+// ra spill need recording; a0-a7/fa0-fa7 are volatile. Codes are stored in
+// reverse chronological order. See llvm/docs/RISCVWinCFI.md.
+static const uint8_t tailMergeUnwindInfoRISCV64[] = {
+    0x01,       // Version=1, Flags=UNW_FLAG_NHANDLER
+    0x48,       // Size of prolog (72 bytes, through the last fsd)
+    0x04,       // Count of unwind code slots
+    0x00,       // No frame register
+    0x08, 0x04, // Offset 0x08: UOP_SaveNonVol(ra)
+    0x10, 0x00, //             at [sp+0x80] (0x10 << 3)
+    0x04, 0x01, // Offset 0x04: UOP_AllocLarge
+    0x12, 0x00, //             144 bytes (0x12 << 3)
+};
+
 // A chunk for the delay import thunk.
 class ThunkChunkX64 : public NonSectionCodeChunk {
 public:
@@ -568,6 +643,86 @@ public:
 
   Chunk *desc = nullptr;
   Defined *helper = nullptr;
+};
+
+class ThunkChunkRISCV64 : public NonSectionCodeChunk {
+public:
+  ThunkChunkRISCV64(Defined *i, Chunk *tm) : imp(i), tailMerge(tm) {
+    setAlignment(4);
+  }
+
+  size_t getSize() const override { return sizeof(thunkRISCV64); }
+  MachineTypes getMachine() const override { return RISCV64; }
+
+  void writeTo(uint8_t *buf) const override {
+    memcpy(buf, thunkRISCV64, sizeof(thunkRISCV64));
+    int64_t impOff = imp->getRVA() - rva;
+    applyRiscvHi20(buf + 0, impOff);
+    applyRiscvLo12I(buf + 4, impOff);
+    int64_t tmOff = tailMerge->getRVA() - (rva + 8);
+    applyRiscvHi20(buf + 8, tmOff);
+    applyRiscvLo12I(buf + 12, tmOff);
+  }
+
+  Defined *imp = nullptr;
+  Chunk *tailMerge = nullptr;
+};
+
+class TailMergeChunkRISCV64 : public NonSectionCodeChunk {
+public:
+  TailMergeChunkRISCV64(Chunk *d, Defined *h) : desc(d), helper(h) {
+    setAlignment(4);
+  }
+
+  size_t getSize() const override { return sizeof(tailMergeRISCV64); }
+  MachineTypes getMachine() const override { return RISCV64; }
+
+  void writeTo(uint8_t *buf) const override {
+    memcpy(buf, tailMergeRISCV64, sizeof(tailMergeRISCV64));
+    int64_t descOff = desc->getRVA() - (rva + 76);
+    applyRiscvHi20(buf + 76, descOff);
+    applyRiscvLo12I(buf + 80, descOff);
+    if (helper) {
+      int64_t helperOff = helper->getRVA() - (rva + 84);
+      applyRiscvHi20(buf + 84, helperOff);
+      applyRiscvLo12I(buf + 88, helperOff);
+    }
+  }
+
+  Chunk *desc = nullptr;
+  Defined *helper = nullptr;
+};
+
+class TailMergePDataChunkRISCV64 : public NonSectionChunk {
+public:
+  TailMergePDataChunkRISCV64(Chunk *tm, Chunk *unwind)
+      : tm(tm), unwind(unwind) {
+    setAlignment(4);
+  }
+
+  size_t getSize() const override { return 3 * sizeof(uint32_t); }
+  MachineTypes getMachine() const override { return RISCV64; }
+
+  void writeTo(uint8_t *buf) const override {
+    write32le(buf + 0, tm->getRVA());
+    write32le(buf + 4, tm->getRVA() + tm->getSize());
+    write32le(buf + 8, unwind->getRVA());
+  }
+
+  Chunk *tm = nullptr;
+  Chunk *unwind = nullptr;
+};
+
+class TailMergeUnwindInfoRISCV64 : public NonSectionChunk {
+public:
+  TailMergeUnwindInfoRISCV64() { setAlignment(4); }
+
+  size_t getSize() const override { return sizeof(tailMergeUnwindInfoRISCV64); }
+  MachineTypes getMachine() const override { return RISCV64; }
+
+  void writeTo(uint8_t *buf) const override {
+    memcpy(buf, tailMergeUnwindInfoRISCV64, sizeof(tailMergeUnwindInfoRISCV64));
+  }
 };
 
 // A chunk for the import descriptor table.
@@ -1049,6 +1204,8 @@ Chunk *DelayLoadContents::newTailMergeChunk(SymbolTable &symtab, Chunk *dir) {
     return make<TailMergeChunkARM>(ctx, dir, helper);
   case ARM64:
     return make<TailMergeChunkARM64>(dir, helper);
+  case RISCV64:
+    return make<TailMergeChunkRISCV64>(dir, helper);
   default:
     llvm_unreachable("unsupported machine type");
   }
@@ -1062,6 +1219,11 @@ Chunk *DelayLoadContents::newTailMergePDataChunk(SymbolTable &symtab,
     if (!symtab.tailMergeUnwindInfoChunk)
       symtab.tailMergeUnwindInfoChunk = make<TailMergeUnwindInfoX64>();
     return make<TailMergePDataChunkX64>(tm, symtab.tailMergeUnwindInfoChunk);
+  case RISCV64:
+    if (!symtab.tailMergeUnwindInfoChunk)
+      symtab.tailMergeUnwindInfoChunk = make<TailMergeUnwindInfoRISCV64>();
+    return make<TailMergePDataChunkRISCV64>(tm,
+                                            symtab.tailMergeUnwindInfoChunk);
     // FIXME: Add support for other architectures.
   default:
     return nullptr; // Just don't generate unwind info.
@@ -1080,6 +1242,8 @@ Chunk *DelayLoadContents::newThunkChunk(DefinedImportData *s,
     return make<ThunkChunkARM>(ctx, s, tailMerge);
   case ARM64:
     return make<ThunkChunkARM64>(s, tailMerge);
+  case RISCV64:
+    return make<ThunkChunkRISCV64>(s, tailMerge);
   default:
     llvm_unreachable("unsupported machine type");
   }

@@ -453,6 +453,8 @@ bool link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
       add("-machine:arm64x");
     else if (s == "mipspe")
       add("-machine:mips");
+    else if (s == "riscv64pe")
+      add("-machine:riscv64");
     else
       error("unknown parameter: -m" + s);
   }

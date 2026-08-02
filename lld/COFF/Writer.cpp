@@ -2727,6 +2727,7 @@ void Writer::sortExceptionTables() {
 
   switch (ctx.config.machine) {
   case AMD64:
+  case RISCV64:
     sortExceptionTable<EntryX64>(pdata);
     break;
   case ARM64EC:

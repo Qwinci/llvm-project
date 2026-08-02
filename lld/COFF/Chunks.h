@@ -283,6 +283,8 @@ public:
                    uint64_t p, uint64_t imageBase) const;
   void applyRelARM64(uint8_t *off, uint16_t type, OutputSection *os, uint64_t s,
                      uint64_t p, uint64_t imageBase) const;
+  void applyRelRISCV64(uint8_t *off, uint16_t type, OutputSection *os,
+                       uint64_t s, uint64_t p, uint64_t imageBase) const;
 
   void getRuntimePseudoRelocs(std::vector<RuntimePseudoReloc> &res);
 
@@ -555,6 +557,14 @@ static const uint8_t importThunkARM64[] = {
     0x00, 0x02, 0x1f, 0xd6, // br   x16
 };
 
+// Mirrors ARM64's import thunk: a pc-relative load of the __imp_ slot followed
+// by an indirect jump.
+static const uint8_t importThunkRISCV64[] = {
+    0x97, 0x02, 0x00, 0x00, // auipc t0, 0
+    0x83, 0xb2, 0x02, 0x00, // ld    t0, 0(t0)
+    0x67, 0x80, 0x02, 0x00, // jr    t0
+};
+
 static const uint8_t importThunkARM64EC[] = {
     0x0b, 0x00, 0x00, 0x90, // adrp x11, 0x0
     0x6b, 0x01, 0x40, 0xf9, // ldr  x11, [x11]
@@ -623,6 +633,17 @@ public:
 
 private:
   MachineTypes machine;
+};
+
+class ImportThunkChunkRISCV64 : public ImportThunkChunk {
+public:
+  explicit ImportThunkChunkRISCV64(COFFLinkerContext &ctx, Defined *s)
+      : ImportThunkChunk(ctx, s) {
+    setAlignment(4);
+  }
+  size_t getSize() const override { return sizeof(importThunkRISCV64); }
+  void writeTo(uint8_t *buf) const override;
+  MachineTypes getMachine() const override { return RISCV64; }
 };
 
 // ARM64EC __impchk_* thunk implementation.
@@ -980,6 +1001,9 @@ void applyBranch24T(uint8_t *off, int32_t v);
 void applyArm64Addr(uint8_t *off, uint64_t s, uint64_t p, int shift);
 void applyArm64Imm(uint8_t *off, uint64_t imm, uint32_t rangeLimit);
 void applyArm64Branch26(uint8_t *off, int64_t v);
+
+void applyRiscvHi20(uint8_t *off, int64_t val);
+void applyRiscvLo12I(uint8_t *off, int64_t val);
 
 // Convenience class for initializing a coff_section with specific flags.
 class FakeSection {
